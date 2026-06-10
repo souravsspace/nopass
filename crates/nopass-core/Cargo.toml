@@ -1,0 +1,16 @@
+[package]
+name = "nopass-core"
+description = "Core engine for nopass, a fast self-contained password manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+age.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
