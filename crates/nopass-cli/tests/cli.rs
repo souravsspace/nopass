@@ -440,3 +440,122 @@ fn native_wrong_identity_cannot_decrypt() {
     store.cmd().args(["keygen", "--force"]).assert().success();
     store.cmd().args(["show", "cred"]).assert().failure();
 }
+
+// ---- auto-sync: pull + push to the configured remote on every change ----
+
+fn git_env(cmd: &mut Command) -> &mut Command {
+    cmd.env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+}
+
+/// Bare repo acting as the remote, plus a store wired to it.
+fn store_with_remote() -> (TestStore, std::path::PathBuf) {
+    let store = TestStore::new();
+    let bare = store.dir.path().join("remote.git");
+    std::process::Command::new("git")
+        .args(["init", "-q", "--bare", "-b", "main"])
+        .arg(&bare)
+        .status()
+        .unwrap();
+    git_env(&mut store.cmd())
+        .args(["git", "init", "-q", "-b", "main"])
+        .assert()
+        .success();
+    store
+        .cmd()
+        .args(["git", "remote", "add", "origin"])
+        .arg(&bare)
+        .assert()
+        .success();
+    (store, bare)
+}
+
+fn remote_log(bare: &std::path::Path) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(bare)
+        .args(["log", "--format=%s", "main"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn autosync_pushes_every_change_to_remote() {
+    let (store, bare) = store_with_remote();
+
+    git_env(&mut store.cmd())
+        .args(["insert", "-e", "cred1"])
+        .write_stdin("pw\n")
+        .assert()
+        .success();
+    assert!(remote_log(&bare).contains("Add given password for cred1"));
+
+    git_env(&mut store.cmd())
+        .args(["mv", "cred1", "cred2"])
+        .assert()
+        .success();
+    assert!(remote_log(&bare).contains("Rename cred1 to cred2"));
+
+    git_env(&mut store.cmd())
+        .args(["rm", "-f", "cred2"])
+        .assert()
+        .success();
+    assert!(remote_log(&bare).contains("Remove cred2 from store"));
+}
+
+#[test]
+fn autosync_can_be_disabled() {
+    let (store, bare) = store_with_remote();
+    git_env(&mut store.cmd())
+        .env("NOPASS_AUTOSYNC", "0")
+        .args(["insert", "-e", "cred1"])
+        .write_stdin("pw\n")
+        .assert()
+        .success();
+    assert!(!remote_log(&bare).contains("cred1"));
+}
+
+#[test]
+fn autosync_pulls_remote_changes_before_pushing() {
+    let (store, bare) = store_with_remote();
+
+    // First change reaches the remote.
+    git_env(&mut store.cmd())
+        .args(["insert", "-e", "cred1"])
+        .write_stdin("pw\n")
+        .assert()
+        .success();
+
+    // A second machine clones, adds an entry, pushes.
+    let other = store.dir.path().join("other");
+    std::process::Command::new("git")
+        .args(["clone", "-q"])
+        .arg(&bare)
+        .arg(&other)
+        .status()
+        .unwrap();
+    let mut second = Command::cargo_bin("nopass").unwrap();
+    git_env(&mut second)
+        .env("NOPASS_DIR", &other)
+        .env("NOPASS_BACKEND", "plain")
+        .args(["insert", "-e", "from-other-machine"])
+        .write_stdin("pw2\n")
+        .assert()
+        .success();
+
+    // First machine makes another change: must rebase on top and push,
+    // ending up with both entries everywhere.
+    git_env(&mut store.cmd())
+        .args(["insert", "-e", "cred3"])
+        .write_stdin("pw3\n")
+        .assert()
+        .success();
+
+    let log = remote_log(&bare);
+    assert!(log.contains("from-other-machine"), "{log}");
+    assert!(log.contains("cred3"), "{log}");
+    assert!(store.exists("from-other-machine.np"));
+}
