@@ -113,6 +113,12 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Check for a new version and install it
+    Update {
+        /// Only check; don't install
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() {
@@ -167,7 +173,99 @@ fn run() -> Result<()> {
             new_path,
         }) => cmd_copy_move(&store, &old_path, &new_path, false, force),
         Some(Cmd::Git { args }) => cmd_git(&store, &args),
+        Some(Cmd::Update { check }) => cmd_update(check),
     }
+}
+
+const REPO: &str = "souravsspace/nopass";
+
+/// Parse "1.2.3" into a comparable tuple; non-numeric parts become 0.
+fn parse_version(v: &str) -> (u64, u64, u64) {
+    let mut parts = v
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
+}
+
+/// Latest release tag from GitHub, e.g. "v0.2.0".
+fn latest_release_tag() -> Result<String> {
+    let out = Command::new("curl")
+        .args([
+            "-fsSL",
+            "--max-time",
+            "15",
+            &format!("https://api.github.com/repos/{REPO}/releases/latest"),
+        ])
+        .output()
+        .context("could not run curl to check for updates")?;
+    if !out.status.success() {
+        bail!("could not reach GitHub to check for updates (are you online?)");
+    }
+    let body = String::from_utf8_lossy(&out.stdout);
+    body.split("\"tag_name\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').nth(1))
+        .map(str::to_string)
+        .context("no releases published yet")
+}
+
+fn installed_via_brew() -> bool {
+    Command::new("brew")
+        .args(["list", "--formula", "nopass"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn cmd_update(check_only: bool) -> Result<()> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("Current version: {current}");
+    let latest = latest_release_tag()?;
+    println!("Latest release:  {latest}");
+
+    if parse_version(&latest) <= parse_version(current) {
+        println!("nopass is up to date.");
+        return Ok(());
+    }
+    if check_only {
+        println!("Update available. Run \"nopass update\" to install it.");
+        return Ok(());
+    }
+
+    if installed_via_brew() {
+        println!("Updating via Homebrew...");
+        let status = Command::new("brew").args(["upgrade", "nopass"]).status()?;
+        if !status.success() {
+            bail!("brew upgrade failed");
+        }
+    } else {
+        println!("Updating via cargo (building {latest} from source)...");
+        let status = Command::new("cargo")
+            .args([
+                "install",
+                "--git",
+                &format!("https://github.com/{REPO}"),
+                "--tag",
+                &latest,
+                "nopass-cli",
+                "--force",
+            ])
+            .status()
+            .context("cargo not found; install the new version with your package manager")?;
+        if !status.success() {
+            bail!("cargo install failed");
+        }
+    }
+    println!("Updated to {latest}.");
+    Ok(())
 }
 
 fn cmd_keygen(force: bool) -> Result<()> {
@@ -493,4 +591,19 @@ fn copy_to_clipboard(text: &str, name: &str) -> Result<()> {
         .ok();
     println!("Copied {name} to clipboard. Will clear in {clip_time} seconds.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_version;
+
+    #[test]
+    fn version_parsing_and_ordering() {
+        assert_eq!(parse_version("v1.2.3"), (1, 2, 3));
+        assert_eq!(parse_version("0.1.0"), (0, 1, 0));
+        assert_eq!(parse_version("2"), (2, 0, 0));
+        assert!(parse_version("v0.2.0") > parse_version("0.1.9"));
+        assert!(parse_version("v0.1.0") <= parse_version("0.1.0"));
+        assert!(parse_version("1.0.0") > parse_version("0.99.99"));
+    }
 }
