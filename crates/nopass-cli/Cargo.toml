@@ -1,0 +1,21 @@
+[package]
+name = "nopass-cli"
+description = "nopass: a fast, self-contained password manager CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nopass"
+path = "src/main.rs"
+
+[dependencies]
+nopass-core = { path = "../nopass-core" }
+anyhow.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
