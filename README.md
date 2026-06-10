@@ -35,6 +35,13 @@ cargo install --path crates/nopass-cli
 nopass --version
 ```
 
+Or via Homebrew (once the tap is published):
+
+```sh
+brew tap souravsspace/tap
+brew install nopass
+```
+
 Or for development, [devbox](https://www.jetify.com/devbox) provides the
 whole toolchain:
 
@@ -42,6 +49,16 @@ whole toolchain:
 devbox shell
 cargo build --release   # binary at target/release/nopass
 ```
+
+### Updating
+
+```sh
+nopass update --check    # see if a newer release exists
+nopass update            # install it (auto-detects brew vs cargo install)
+```
+
+Homebrew users can equally run `brew upgrade nopass`. Maintainer release
+flow lives in [RELEASING.md](RELEASING.md).
 
 ## Getting started, A to Z
 
@@ -190,6 +207,7 @@ nopass rm [-r] [-f] name                 remove entry or directory
 nopass mv [-f] old new                   move + re-encrypt
 nopass cp [-f] old new                   copy + re-encrypt
 nopass git <args>...                     run any git command in the store
+nopass update [--check]                  update nopass itself
 ```
 
 Aliases: `ls`=`list`, `rm`=`remove`/`delete`, `mv`=`rename`, `cp`=`copy`.
