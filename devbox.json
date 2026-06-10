@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.2/.schema/devbox.schema.json",
+  "packages": ["rustup@latest", "gnupg@latest", "git@latest"],
+  "shell": {
+    "init_hook": ["rustup default stable >/dev/null 2>&1 || true"],
+    "scripts": {
+      "test": "cargo test --workspace",
+      "lint": "cargo clippy --workspace --all-targets -- -D warnings",
+      "fmt": "cargo fmt --all"
+    }
+  }
+}
