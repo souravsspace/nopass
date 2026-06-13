@@ -4,7 +4,22 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nopass_core::{crypto, default_crypto, default_store_dir, git, Store};
+use nopass_core::lock::{encrypt_slot, LockedIdentity, SecretString};
+use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, Unlocker};
+
+mod auth;
+#[cfg(all(target_os = "macos", feature = "touchid"))]
+mod touchid;
+
+/// Build the crypto backend, attaching the interactive unlocker so locked
+/// (passkey/passphrase) identities prompt for authentication on use.
+fn build_crypto() -> Box<dyn Crypto> {
+    match std::env::var("NOPASS_BACKEND").as_deref() {
+        Ok("plain") => Box::new(nopass_core::PlainCrypto),
+        Ok("gpg") => Box::new(nopass_core::GpgCrypto::new()),
+        _ => Box::new(NativeCrypto::new().with_unlocker(Box::new(auth::CliUnlocker))),
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -119,6 +134,25 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Lock the identity behind authentication (passphrase + Touch ID)
+    Passkey {
+        #[command(subcommand)]
+        action: PasskeyCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum PasskeyCmd {
+    /// Encrypt the identity so every access requires authentication
+    Enroll {
+        /// Skip the macOS Touch ID slot (passphrase only)
+        #[arg(long)]
+        no_touchid: bool,
+    },
+    /// Remove locking, restoring a plaintext identity (requires auth)
+    Disable,
+    /// Show whether the identity is locked and which slots exist
+    Status,
 }
 
 fn main() {
@@ -130,7 +164,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let store = Store::open(default_store_dir(), default_crypto());
+    let store = Store::open(default_store_dir(), build_crypto());
 
     match cli.command {
         None => show_or_list(&store, cli.name.as_deref().unwrap_or(""), None),
@@ -174,6 +208,7 @@ fn run() -> Result<()> {
         }) => cmd_copy_move(&store, &old_path, &new_path, false, force),
         Some(Cmd::Git { args }) => cmd_git(&store, &args),
         Some(Cmd::Update { check }) => cmd_update(check),
+        Some(Cmd::Passkey { action }) => cmd_passkey(action),
     }
 }
 
@@ -283,6 +318,150 @@ fn cmd_keygen(force: bool) -> Result<()> {
     let public = crypto::generate_identity(&identity_file).map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("Generated new identity at {}", identity_file.display());
     println!("Public key: {public}");
+    Ok(())
+}
+
+/// Recover the current identity secret, unlocking it first if the file is
+/// already locked (which prompts for authentication).
+fn current_identity_secret(path: &std::path::Path) -> Result<String> {
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("no identity found at {}", path.display()))?;
+    if LockedIdentity::is_locked_file(&contents) {
+        let locked = LockedIdentity::parse(&contents)?;
+        Ok(auth::CliUnlocker.unlock(&locked)?)
+    } else {
+        Ok(crypto::read_identity_secret(path)?)
+    }
+}
+
+fn cmd_passkey(action: PasskeyCmd) -> Result<()> {
+    let identity_file = crypto::default_identity_file();
+    match action {
+        PasskeyCmd::Enroll { no_touchid } => cmd_passkey_enroll(&identity_file, no_touchid),
+        PasskeyCmd::Disable => cmd_passkey_disable(&identity_file),
+        PasskeyCmd::Status => cmd_passkey_status(&identity_file),
+    }
+}
+
+fn cmd_passkey_enroll(identity_file: &std::path::Path, no_touchid: bool) -> Result<()> {
+    if !identity_file.exists() {
+        bail!(
+            "No identity at {}. Run \"nopass keygen\" or \"nopass init\" first.",
+            identity_file.display()
+        );
+    }
+    // Recover the secret (prompts to unlock if already locked).
+    let secret = current_identity_secret(identity_file)?;
+
+    // Passphrase slot: always present, the cross-platform lock.
+    let passphrase = prompt_hidden("Choose a passphrase to lock your identity: ")?;
+    if passphrase.is_empty() {
+        bail!("Error: passphrase must not be empty.");
+    }
+    let again = prompt_hidden("Retype passphrase: ")?;
+    if passphrase != again {
+        bail!("Error: the entered passphrases do not match.");
+    }
+    let passphrase_slot = Some(encrypt_slot(&secret, &SecretString::from(passphrase))?);
+
+    // Optional Touch ID slot (macOS + touchid feature).
+    let keychain_slot = enroll_touchid_slot(&secret, no_touchid);
+
+    let locked = LockedIdentity {
+        passphrase_slot,
+        keychain_slot,
+    };
+    write_identity_file(identity_file, &locked.serialize())?;
+
+    println!("Identity locked. Every access now requires authentication.");
+    if locked.has_keychain() {
+        println!("Slots: Touch ID + passphrase fallback.");
+    } else {
+        println!("Slot: passphrase.");
+    }
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", feature = "touchid"))]
+fn enroll_touchid_slot(secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
+    if no_touchid {
+        return None;
+    }
+    match touchid::enroll_slot(secret) {
+        Ok(slot) => Some(slot),
+        Err(e) => {
+            eprintln!("Skipping Touch ID slot: {e}");
+            None
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "macos", feature = "touchid")))]
+fn enroll_touchid_slot(_secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
+    if !no_touchid {
+        eprintln!(
+            "Note: Touch ID support is not built in; locking with passphrase only. \
+             (Rebuild with --features touchid on macOS to enable it.)"
+        );
+    }
+    None
+}
+
+fn cmd_passkey_disable(identity_file: &std::path::Path) -> Result<()> {
+    let contents = std::fs::read_to_string(identity_file)
+        .with_context(|| format!("no identity found at {}", identity_file.display()))?;
+    if !LockedIdentity::is_locked_file(&contents) {
+        bail!("The identity is not locked.");
+    }
+    let locked = LockedIdentity::parse(&contents)?;
+    let secret = auth::CliUnlocker.unlock(&locked)?;
+    let public = crypto::write_plaintext_identity(identity_file, &secret)?;
+    remove_touchid_slot();
+    println!("Identity unlocked and stored in plaintext for {public}.");
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", feature = "touchid"))]
+fn remove_touchid_slot() {
+    if let Err(e) = touchid::remove_key() {
+        eprintln!("Note: could not remove the Touch ID key: {e}");
+    }
+}
+
+#[cfg(not(all(target_os = "macos", feature = "touchid")))]
+fn remove_touchid_slot() {}
+
+fn cmd_passkey_status(identity_file: &std::path::Path) -> Result<()> {
+    let Ok(contents) = std::fs::read_to_string(identity_file) else {
+        println!("No identity found at {}.", identity_file.display());
+        return Ok(());
+    };
+    if !LockedIdentity::is_locked_file(&contents) {
+        println!("Identity is unlocked (plaintext on disk). Run \"nopass passkey enroll\" to lock it.");
+        return Ok(());
+    }
+    let locked = LockedIdentity::parse(&contents)?;
+    println!("Identity is locked. Slots:");
+    if locked.has_keychain() {
+        println!("  - Touch ID (macOS Secure Enclave)");
+    }
+    if locked.has_passphrase() {
+        println!("  - passphrase");
+    }
+    Ok(())
+}
+
+/// Write `contents` to the identity file with 0600 permissions.
+fn write_identity_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
 }
 
