@@ -6,8 +6,9 @@
 //! key-slot model of disk encryption: unlocking any one slot recovers the
 //! identity, and slots can be added or removed independently.
 
-use age::secrecy::SecretString;
 use base64::Engine;
+
+pub use age::secrecy::SecretString;
 
 use crate::error::{Error, Result};
 
