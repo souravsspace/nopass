@@ -29,6 +29,18 @@ pub enum Error {
     #[error("no identity found at {0}. Run \"nopass keygen\" first.")]
     NoIdentity(PathBuf),
 
+    #[error("Error: the identity is locked but no authentication is available to unlock it.")]
+    Locked,
+
+    #[error("authentication failed: {0}")]
+    AuthFailed(String),
+
+    #[error("authentication is unavailable on this system: {0}")]
+    AuthUnavailable(String),
+
+    #[error("Error: the locked identity file at {0} is malformed.")]
+    MalformedLock(PathBuf),
+
     #[error("git: {0}")]
     Git(String),
 
