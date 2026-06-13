@@ -133,6 +133,36 @@ pub fn read_identity_secret(path: &Path) -> Result<String> {
         .ok_or_else(|| Error::NoIdentity(path.to_path_buf()))
 }
 
+/// Derive the public recipient (`age1...`) from a secret-key string.
+pub fn public_from_secret(secret: &str) -> Option<String> {
+    secret
+        .trim()
+        .parse::<age::x25519::Identity>()
+        .ok()
+        .map(|id| id.to_public().to_string())
+}
+
+/// Write a plaintext identity file (0600) holding `secret`, returning its
+/// public recipient. Inverse of locking — used by `passkey disable`.
+pub fn write_plaintext_identity(path: &Path, secret: &str) -> Result<String> {
+    let public = public_from_secret(secret)
+        .ok_or_else(|| Error::AuthFailed("not a valid age secret key".into()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let contents = format!(
+        "# nopass identity file — keep this secret\n# public key: {public}\n{}\n",
+        secret.trim()
+    );
+    std::fs::write(path, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(public)
+}
+
 /// Read the public recipient corresponding to the identity file, if present.
 pub fn identity_recipient(path: &Path) -> Option<String> {
     let contents = std::fs::read_to_string(path).ok()?;
