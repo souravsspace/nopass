@@ -208,9 +208,46 @@ nopass mv [-f] old new                   move + re-encrypt
 nopass cp [-f] old new                   copy + re-encrypt
 nopass git <args>...                     run any git command in the store
 nopass update [--check]                  update nopass itself
+nopass passkey enroll [--no-touchid]     lock the identity behind auth
+nopass passkey disable                   remove the lock (requires auth)
+nopass passkey status                    show lock state and slots
 ```
 
 Aliases: `ls`=`list`, `rm`=`remove`/`delete`, `mv`=`rename`, `cp`=`copy`.
+
+## Locking your identity (passkey)
+
+By default your secret identity file sits on disk readable by your user, so
+anything that can read it can decrypt your store. To require authentication on
+every access, **lock** the identity:
+
+```sh
+nopass passkey enroll        # choose a passphrase (and Touch ID on macOS)
+```
+
+After enrolling, the identity file is itself encrypted. Every command that
+decrypts an entry (`show`, `grep`, `edit`, `generate -i`, `mv`, `cp`) prompts
+to unlock first — reading the file directly no longer reveals the key.
+
+Locking uses independent **slots**, like disk encryption: unlocking any one
+slot recovers the identity.
+
+- **Passphrase slot** — always created, works on every platform. The
+  passphrase is run through scrypt; the identity is sealed with age.
+- **Touch ID slot** *(macOS, optional)* — a non-extractable key in the Secure
+  Enclave, gated by Touch ID. Build with `--features touchid` and a
+  **code-signed** binary with keychain entitlements; an unsigned build (plain
+  `cargo install`) can't create Secure Enclave keys, so enrollment falls back
+  to passphrase-only. When both slots exist, Touch ID is tried first and the
+  passphrase is the fallback.
+
+```sh
+nopass passkey status        # see whether it's locked and which slots exist
+nopass passkey disable       # unlock (prompts), then store plaintext again
+```
+
+Re-running `enroll` on an already-locked identity unlocks it first, so you can
+change the passphrase or add the Touch ID slot later.
 
 ## Configuration
 
@@ -257,6 +294,9 @@ All optional, via environment variables:
 
 - Entry **names are not encrypted** (they're file names). Don't put secrets
   in entry names.
+- By default the secret identity is stored unencrypted (mode 0600). Run
+  `nopass passkey enroll` to encrypt it behind a passphrase and/or Touch ID so
+  access requires authentication.
 - The clipboard is cleared after `NOPASS_CLIP_TIME` seconds, but other apps
   may read the clipboard during that window.
 - `nopass edit` writes plaintext to a temp dir (`/dev/shm` ramdisk when
