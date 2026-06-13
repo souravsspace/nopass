@@ -441,6 +441,124 @@ fn native_wrong_identity_cannot_decrypt() {
     store.cmd().args(["show", "cred"]).assert().failure();
 }
 
+#[test]
+fn passkey_enroll_locks_identity_and_gates_access() {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd()
+        .args(["insert", "-e", "cred"])
+        .write_stdin("top secret\n")
+        .assert()
+        .success();
+
+    let identity = store.dir.path().join("identity.txt");
+    assert!(
+        std::fs::read_to_string(&identity)
+            .unwrap()
+            .contains("AGE-SECRET-KEY"),
+        "identity should start out as plaintext"
+    );
+
+    // Lock it behind a passphrase (two prompts: choose + retype).
+    store
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("master-pass\nmaster-pass\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Every access now requires"));
+
+    // On disk the identity is now a locked file with a passphrase slot.
+    let locked = std::fs::read_to_string(&identity).unwrap();
+    assert!(locked.starts_with("# nopass-locked v1"), "{locked}");
+    assert!(!locked.contains("AGE-SECRET-KEY"), "{locked}");
+
+    // Status reports it as locked.
+    store
+        .cmd()
+        .args(["passkey", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked").and(predicate::str::contains("passphrase")));
+
+    // Showing the entry requires the passphrase.
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+
+    // Wrong passphrase is rejected.
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .write_stdin("wrong-pass\n")
+        .assert()
+        .failure();
+
+    // Disabling restores plaintext access (no further prompts needed).
+    store
+        .cmd()
+        .args(["passkey", "disable"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unlocked and stored in plaintext"));
+    assert!(std::fs::read_to_string(&identity)
+        .unwrap()
+        .contains("AGE-SECRET-KEY"));
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .assert()
+        .success()
+        .stdout("top secret\n");
+}
+
+#[test]
+fn passkey_enroll_rejects_mismatched_passphrases() {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("one\ntwo\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("do not match"));
+}
+
+#[test]
+fn locked_identity_without_input_does_not_hang() {
+    // With no passphrase available on a closed stdin, unlocking fails
+    // rather than succeeding or blocking forever.
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd()
+        .args(["insert", "-e", "cred"])
+        .write_stdin("secret\n")
+        .assert()
+        .success();
+    store
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("pw\npw\n")
+        .assert()
+        .success();
+
+    // Empty stdin -> empty passphrase -> wrong -> failure.
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .failure();
+}
+
 // ---- auto-sync: pull + push to the configured remote on every change ----
 
 fn git_env(cmd: &mut Command) -> &mut Command {
