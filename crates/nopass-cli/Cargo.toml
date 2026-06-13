@@ -14,6 +14,18 @@ path = "src/main.rs"
 nopass-core = { path = "../nopass-core" }
 anyhow.workspace = true
 clap.workspace = true
+rand.workspace = true
+
+[features]
+default = []
+# Touch ID (Secure Enclave) unlock slot on macOS. Requires a code-signed
+# build with keychain entitlements to function at runtime; the passphrase
+# slot works without it.
+touchid = ["dep:security-framework", "dep:security-framework-sys"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3", features = ["OSX_10_15"], optional = true }
+security-framework-sys = { version = "2", optional = true }
 
 [dev-dependencies]
 assert_cmd.workspace = true
