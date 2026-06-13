@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 use age::secrecy::ExposeSecret;
 
 use crate::error::{Error, Result};
+use crate::lock::{LockedIdentity, Unlocker};
 
 /// Pluggable encryption backend. The default is [`NativeCrypto`], which
 /// needs nothing but the nopass binary itself; [`GpgCrypto`] is available
@@ -19,28 +20,61 @@ pub trait Crypto: Send + Sync {
 /// local identity file created by `nopass keygen`.
 pub struct NativeCrypto {
     identity_file: PathBuf,
+    unlocker: Option<Box<dyn Unlocker>>,
 }
 
 impl NativeCrypto {
     pub fn new() -> Self {
         Self {
             identity_file: default_identity_file(),
+            unlocker: None,
         }
     }
 
     pub fn with_identity_file(identity_file: PathBuf) -> Self {
-        Self { identity_file }
+        Self {
+            identity_file,
+            unlocker: None,
+        }
+    }
+
+    /// Attach an [`Unlocker`] so locked identity files can be opened by
+    /// prompting for a passkey/passphrase. Without one, locked identities
+    /// fail with [`Error::Locked`].
+    pub fn with_unlocker(mut self, unlocker: Box<dyn Unlocker>) -> Self {
+        self.unlocker = Some(unlocker);
+        self
+    }
+
+    fn parse_identities(text: &str) -> Vec<age::x25519::Identity> {
+        text.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .filter_map(|l| l.parse().ok())
+            .collect()
     }
 
     fn identities(&self) -> Result<Vec<age::x25519::Identity>> {
         let contents = std::fs::read_to_string(&self.identity_file)
             .map_err(|_| Error::NoIdentity(self.identity_file.clone()))?;
-        let ids: Vec<age::x25519::Identity> = contents
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .filter_map(|l| l.parse().ok())
-            .collect();
+
+        // A locked identity must be unlocked (Touch ID / passphrase) before
+        // its secret key is usable.
+        if LockedIdentity::is_locked_file(&contents) {
+            let locked = LockedIdentity::parse(&contents)
+                .map_err(|_| Error::MalformedLock(self.identity_file.clone()))?;
+            let unlocker = self.unlocker.as_ref().ok_or(Error::Locked)?;
+            let secret = unlocker.unlock(&locked)?;
+            let ids = Self::parse_identities(&secret);
+            if ids.is_empty() {
+                return Err(Error::AuthFailed(
+                    "unlocked data did not contain a valid identity".into(),
+                ));
+            }
+            return Ok(ids);
+        }
+
+        let ids = Self::parse_identities(&contents);
         if ids.is_empty() {
             return Err(Error::NoIdentity(self.identity_file.clone()));
         }
@@ -81,6 +115,22 @@ pub fn generate_identity(path: &Path) -> Result<String> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(public)
+}
+
+/// Read the plaintext `AGE-SECRET-KEY-...` string from an *unlocked*
+/// identity file. Returns [`Error::Locked`] if the file is already locked.
+pub fn read_identity_secret(path: &Path) -> Result<String> {
+    let contents =
+        std::fs::read_to_string(path).map_err(|_| Error::NoIdentity(path.to_path_buf()))?;
+    if LockedIdentity::is_locked_file(&contents) {
+        return Err(Error::Locked);
+    }
+    contents
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#') && l.parse::<age::x25519::Identity>().is_ok())
+        .map(str::to_string)
+        .ok_or_else(|| Error::NoIdentity(path.to_path_buf()))
 }
 
 /// Read the public recipient corresponding to the identity file, if present.
@@ -316,5 +366,65 @@ mod tests {
         let file = tmp.path().join("x.np");
         std::fs::write(&file, b"whatever").unwrap();
         assert!(matches!(crypto.decrypt(&file), Err(Error::NoIdentity(_))));
+    }
+
+    #[test]
+    fn locked_identity_needs_unlocker_then_decrypts() {
+        use crate::lock::{decrypt_slot, encrypt_slot, LockedIdentity, Unlocker};
+        use age::secrecy::SecretString;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let id_file = tmp.path().join("identity.txt");
+        let public = generate_identity(&id_file).unwrap();
+        let secret = read_identity_secret(&id_file).unwrap();
+
+        // Lock the identity into a passphrase slot.
+        let locked = LockedIdentity {
+            passphrase_slot: Some(encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap()),
+            keychain_slot: None,
+        };
+        std::fs::write(&id_file, locked.serialize()).unwrap();
+
+        // Encryption to the public recipient needs no identity.
+        let file = tmp.path().join("x.np");
+        NativeCrypto::with_identity_file(id_file.clone())
+            .encrypt(b"hi\n", &[public], &file)
+            .unwrap();
+
+        // Without an unlocker, decryption is refused.
+        let locked_crypto = NativeCrypto::with_identity_file(id_file.clone());
+        assert!(matches!(locked_crypto.decrypt(&file), Err(Error::Locked)));
+
+        // With an unlocker that knows the passphrase, it succeeds.
+        struct PwUnlocker;
+        impl Unlocker for PwUnlocker {
+            fn unlock(&self, locked: &LockedIdentity) -> Result<String> {
+                decrypt_slot(
+                    locked.passphrase_slot.as_ref().unwrap(),
+                    &SecretString::from("pw".to_owned()),
+                )
+            }
+        }
+        let unlocked = NativeCrypto::with_identity_file(id_file).with_unlocker(Box::new(PwUnlocker));
+        assert_eq!(unlocked.decrypt(&file).unwrap(), b"hi\n");
+    }
+
+    #[test]
+    fn read_identity_secret_refuses_locked() {
+        use crate::lock::{encrypt_slot, LockedIdentity};
+        use age::secrecy::SecretString;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let id_file = tmp.path().join("identity.txt");
+        generate_identity(&id_file).unwrap();
+        let secret = read_identity_secret(&id_file).unwrap();
+        assert!(secret.parse::<age::x25519::Identity>().is_ok());
+
+        let locked = LockedIdentity {
+            passphrase_slot: Some(encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap()),
+            keychain_slot: None,
+        };
+        std::fs::write(&id_file, locked.serialize()).unwrap();
+        assert!(matches!(read_identity_secret(&id_file), Err(Error::Locked)));
     }
 }
