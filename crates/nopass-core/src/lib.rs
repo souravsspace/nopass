@@ -6,11 +6,13 @@ pub mod crypto;
 pub mod error;
 pub mod generate;
 pub mod git;
+pub mod lock;
 pub mod paths;
 pub mod store;
 
 pub use crypto::{Crypto, GpgCrypto, NativeCrypto, PlainCrypto};
 pub use error::{Error, Result};
+pub use lock::{LockedIdentity, Unlocker};
 pub use store::{GrepHit, Store};
 
 /// Store location: NOPASS_DIR or ~/.nopass.
