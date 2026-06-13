@@ -10,6 +10,7 @@ repository = "https://github.com/souravsspace/nopass"
 
 [workspace.dependencies]
 age = "0.11"
+base64 = "0.21"
 thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
