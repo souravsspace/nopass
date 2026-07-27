@@ -355,7 +355,31 @@ impl NativeStore {
         cmd.env("NOPASS_DIR", self.dir.path().join("store"))
             .env("NOPASS_IDENTITY", self.dir.path().join("identity.txt"))
             .env_remove("NOPASS_BACKEND")
-            .env_remove("NOPASS_KEY");
+            .env_remove("NOPASS_KEY")
+            .env_remove("NOPASS_FIDO2_MOCK")
+            .env_remove("NOPASS_UNLOCK");
+        cmd
+    }
+
+    fn identity(&self) -> std::path::PathBuf {
+        self.dir.path().join("identity.txt")
+    }
+
+    fn identity_text(&self) -> String {
+        std::fs::read_to_string(self.identity()).unwrap()
+    }
+
+    /// State file for the software test authenticator. Each distinct path is
+    /// a distinct "security key"; the default one stands in for the key the
+    /// user carries around.
+    fn device(&self, name: &str) -> std::path::PathBuf {
+        self.dir.path().join(format!("device-{name}"))
+    }
+
+    /// A command run with security key `name` plugged in.
+    fn cmd_with_key(&self, name: &str) -> Command {
+        let mut cmd = self.cmd();
+        cmd.env("NOPASS_FIDO2_MOCK", self.device(name));
         cmd
     }
 }
@@ -557,6 +581,357 @@ fn locked_identity_without_input_does_not_hang() {
         .write_stdin("")
         .assert()
         .failure();
+}
+
+// ---- FIDO2 security keys (passkeys) ----
+//
+// These drive the real enroll/unlock code paths through the software test
+// authenticator (NOPASS_FIDO2_MOCK), so everything but the USB transport is
+// exercised. The recurring trick is running `show` with *empty stdin*: if a
+// command succeeds that way, nothing prompted, which is the whole point of a
+// security key.
+
+/// A locked store with one entry and a security key enrolled.
+fn store_with_security_key() -> NativeStore {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd()
+        .args(["insert", "-e", "cred"])
+        .write_stdin("top secret\n")
+        .assert()
+        .success();
+    store
+        .cmd_with_key("main")
+        .args(["passkey", "enroll", "--security-key"])
+        .write_stdin("master-pass\nmaster-pass\n")
+        .assert()
+        .success();
+    store
+}
+
+#[test]
+fn security_key_enroll_locks_the_identity_and_records_a_slot() {
+    let store = store_with_security_key();
+
+    let locked = store.identity_text();
+    assert!(locked.starts_with("# nopass-locked v1"), "{locked}");
+    assert!(!locked.contains("AGE-SECRET-KEY"), "{locked}");
+    assert!(locked.contains("slot-fido2:"), "{locked}");
+    // Both factors are recorded: the key, and the passphrase that survives
+    // losing it.
+    assert!(locked.contains("slot-passphrase:"), "{locked}");
+
+    store
+        .cmd()
+        .args(["passkey", "status"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("security key \"security-key\"")
+                .and(predicate::str::contains("hmac-secret"))
+                .and(predicate::str::contains("passphrase")),
+        );
+}
+
+#[test]
+fn security_key_unlocks_without_any_typing() {
+    let store = store_with_security_key();
+
+    // Empty stdin: no passphrase could possibly have been supplied.
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+}
+
+#[test]
+fn without_the_key_the_passphrase_still_works() {
+    let store = store_with_security_key();
+
+    // No key plugged in: nopass says so and falls back to the passphrase.
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+
+    // …and with neither factor, access is refused rather than granted.
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn the_passphrase_can_be_forced_while_the_key_is_plugged_in() {
+    let store = store_with_security_key();
+    store
+        .cmd_with_key("main")
+        .env("NOPASS_UNLOCK", "passphrase")
+        .args(["show", "cred"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+}
+
+#[test]
+fn someone_elses_security_key_does_not_unlock_the_store() {
+    let store = store_with_security_key();
+
+    // A different authenticator holds none of our credentials. It must not
+    // unlock, and must not be quietly accepted either.
+    store
+        .cmd_with_key("stranger")
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .failure();
+
+    // The rightful owner still gets in with the passphrase.
+    store
+        .cmd_with_key("stranger")
+        .args(["show", "cred"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+}
+
+#[test]
+fn enrolling_without_a_key_present_leaves_the_identity_alone() {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    let before = store.identity_text();
+
+    store
+        .cmd()
+        .args(["passkey", "enroll", "--security-key"])
+        .write_stdin("master-pass\nmaster-pass\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("security key"));
+
+    // A half-locked identity would be a disaster; the file must be untouched.
+    assert_eq!(store.identity_text(), before);
+    assert!(before.contains("AGE-SECRET-KEY"));
+}
+
+#[test]
+fn a_key_can_be_added_to_an_already_locked_identity() {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd()
+        .args(["insert", "-e", "cred"])
+        .write_stdin("top secret\n")
+        .assert()
+        .success();
+    // Locked with a passphrase only, the way it works today.
+    store
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("master-pass\nmaster-pass\n")
+        .assert()
+        .success();
+
+    // Adding a key requires proving you can already open the identity.
+    store
+        .cmd_with_key("main")
+        .args(["passkey", "add-key"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Enrolled security key"));
+
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+}
+
+#[test]
+fn add_key_refuses_an_unlocked_identity() {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd_with_key("main")
+        .args(["passkey", "add-key"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not locked"));
+}
+
+#[test]
+fn a_backup_key_can_be_enrolled_and_either_one_opens_the_store() {
+    let store = store_with_security_key();
+
+    // The backup key is a different device, so unlocking to enroll it falls
+    // back to the passphrase.
+    store
+        .cmd_with_key("backup")
+        .args(["passkey", "add-key", "--label", "spare"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success();
+
+    for key in ["main", "backup"] {
+        store
+            .cmd_with_key(key)
+            .args(["show", "cred"])
+            .write_stdin("")
+            .assert()
+            .success()
+            .stdout("top secret\n");
+    }
+}
+
+#[test]
+fn keys_can_be_removed_by_name() {
+    let store = store_with_security_key();
+    store
+        .cmd_with_key("backup")
+        .args(["passkey", "add-key", "--label", "spare"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["passkey", "remove-key", "security-key"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed security key"));
+
+    // The removed key no longer opens anything; the survivor still does.
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .failure();
+    store
+        .cmd_with_key("backup")
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+
+    store
+        .cmd()
+        .args(["passkey", "remove-key", "security-key"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no security key named"));
+}
+
+#[test]
+fn duplicate_and_invalid_key_names_are_rejected() {
+    let store = store_with_security_key();
+
+    store
+        .cmd_with_key("backup")
+        .args(["passkey", "add-key", "--label", "security-key"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already enrolled"));
+
+    store
+        .cmd_with_key("backup")
+        .args(["passkey", "add-key", "--label", "not a name"])
+        .write_stdin("master-pass\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a usable slot name"));
+}
+
+#[test]
+fn a_pin_protected_key_asks_for_the_pin_and_falls_back_when_it_is_wrong() {
+    let store = NativeStore::new();
+    store.cmd().arg("init").assert().success();
+    store
+        .cmd()
+        .args(["insert", "-e", "cred"])
+        .write_stdin("top secret\n")
+        .assert()
+        .success();
+    // Prompts in order: passphrase, retype, then the key's PIN.
+    store
+        .cmd_with_key("main")
+        .args(["passkey", "enroll", "--security-key", "--pin"])
+        .write_stdin("master-pass\nmaster-pass\n1234\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["passkey", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("+ PIN"));
+
+    // Right PIN: in, without touching the passphrase.
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("1234\n")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+
+    // Wrong PIN alone is not enough...
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("0000\n")
+        .assert()
+        .failure();
+
+    // ...but it falls through to the passphrase rather than giving up.
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("0000\nmaster-pass\n")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+}
+
+#[test]
+fn disable_clears_every_slot_including_the_security_key() {
+    let store = store_with_security_key();
+
+    // Unlocking for `disable` can use the key itself: empty stdin.
+    store
+        .cmd_with_key("main")
+        .args(["passkey", "disable"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unlocked and stored in plaintext"));
+
+    let identity = store.identity_text();
+    assert!(identity.contains("AGE-SECRET-KEY"), "{identity}");
+    assert!(!identity.contains("slot-fido2:"), "{identity}");
+    store
+        .cmd()
+        .args(["show", "cred"])
+        .assert()
+        .success()
+        .stdout("top secret\n");
 }
 
 // ---- auto-sync: pull + push to the configured remote on every change ----

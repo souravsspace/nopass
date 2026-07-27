@@ -4,10 +4,13 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nopass_core::lock::{encrypt_slot, LockedIdentity, SecretString};
+use nopass_core::lock::{
+    encrypt_slot, encrypt_slot_with_key, is_valid_label, Fido2Slot, LockedIdentity, SecretString,
+};
 use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, Unlocker};
 
 mod auth;
+mod fido2;
 #[cfg(all(target_os = "macos", feature = "touchid"))]
 mod touchid;
 
@@ -134,7 +137,8 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
-    /// Lock the identity behind authentication (passphrase + Touch ID)
+    /// Lock the identity behind authentication (passphrase, security key,
+    /// Touch ID)
     Passkey {
         #[command(subcommand)]
         action: PasskeyCmd,
@@ -148,6 +152,29 @@ enum PasskeyCmd {
         /// Skip the macOS Touch ID slot (passphrase only)
         #[arg(long)]
         no_touchid: bool,
+        /// Also enroll a FIDO2 security key (passkey)
+        #[arg(long)]
+        security_key: bool,
+        /// Require the security key's PIN as well as a touch
+        #[arg(long, requires = "security_key")]
+        pin: bool,
+        /// Name for the security key slot
+        #[arg(long, value_name = "name", requires = "security_key")]
+        label: Option<String>,
+    },
+    /// Enroll another FIDO2 security key on an already-locked identity
+    AddKey {
+        /// Name for the new slot (defaults to security-key, security-key-2, …)
+        #[arg(long, value_name = "name")]
+        label: Option<String>,
+        /// Require the security key's PIN as well as a touch
+        #[arg(long)]
+        pin: bool,
+    },
+    /// Remove an enrolled security key slot by name
+    RemoveKey {
+        /// Slot name, as shown by `nopass passkey status`
+        label: String,
     },
     /// Remove locking, restoring a plaintext identity (requires auth)
     Disable,
@@ -337,13 +364,26 @@ fn current_identity_secret(path: &std::path::Path) -> Result<String> {
 fn cmd_passkey(action: PasskeyCmd) -> Result<()> {
     let identity_file = crypto::default_identity_file();
     match action {
-        PasskeyCmd::Enroll { no_touchid } => cmd_passkey_enroll(&identity_file, no_touchid),
+        PasskeyCmd::Enroll {
+            no_touchid,
+            security_key,
+            pin,
+            label,
+        } => cmd_passkey_enroll(&identity_file, no_touchid, security_key, pin, label),
+        PasskeyCmd::AddKey { label, pin } => cmd_passkey_add_key(&identity_file, label, pin),
+        PasskeyCmd::RemoveKey { label } => cmd_passkey_remove_key(&identity_file, &label),
         PasskeyCmd::Disable => cmd_passkey_disable(&identity_file),
         PasskeyCmd::Status => cmd_passkey_status(&identity_file),
     }
 }
 
-fn cmd_passkey_enroll(identity_file: &std::path::Path, no_touchid: bool) -> Result<()> {
+fn cmd_passkey_enroll(
+    identity_file: &std::path::Path,
+    no_touchid: bool,
+    security_key: bool,
+    want_pin: bool,
+    label: Option<String>,
+) -> Result<()> {
     if !identity_file.exists() {
         bail!(
             "No identity at {}. Run \"nopass keygen\" or \"nopass init\" first.",
@@ -353,7 +393,8 @@ fn cmd_passkey_enroll(identity_file: &std::path::Path, no_touchid: bool) -> Resu
     // Recover the secret (prompts to unlock if already locked).
     let secret = current_identity_secret(identity_file)?;
 
-    // Passphrase slot: always present, the cross-platform lock.
+    // Passphrase slot: always present, the cross-platform lock. Keeping it
+    // mandatory is what makes a lost or broken security key survivable.
     let passphrase = prompt_hidden("Choose a passphrase to lock your identity: ")?;
     if passphrase.is_empty() {
         bail!("Error: passphrase must not be empty.");
@@ -367,19 +408,167 @@ fn cmd_passkey_enroll(identity_file: &std::path::Path, no_touchid: bool) -> Resu
     // Optional Touch ID slot (macOS + touchid feature).
     let keychain_slot = enroll_touchid_slot(&secret, no_touchid);
 
+    // Optional FIDO2 security key. Enrolled before anything is written, so a
+    // key that refuses leaves the identity exactly as it was.
+    let fido2_slots = if security_key {
+        vec![enroll_security_key(&secret, &[], label, want_pin)?]
+    } else {
+        Vec::new()
+    };
+
     let locked = LockedIdentity {
         passphrase_slot,
         keychain_slot,
+        fido2_slots,
     };
     write_identity_file(identity_file, &locked.serialize())?;
 
     println!("Identity locked. Every access now requires authentication.");
-    if locked.has_keychain() {
-        println!("Slots: Touch ID + passphrase fallback.");
-    } else {
-        println!("Slot: passphrase.");
-    }
+    print_slots(&locked);
     Ok(())
+}
+
+/// Register a new security key and seal `secret` to it, returning the slot.
+/// `existing` is used only to pick a name that isn't taken.
+fn enroll_security_key(
+    secret: &str,
+    existing: &[Fido2Slot],
+    label: Option<String>,
+    want_pin: bool,
+) -> Result<Fido2Slot> {
+    let label = match label {
+        Some(label) => {
+            if !is_valid_label(&label) {
+                bail!(
+                    "Error: {label:?} is not a usable slot name (use letters, digits, \
+                     '-', '_' or '.', up to 32 characters)."
+                );
+            }
+            if existing.iter().any(|s| s.label == label) {
+                bail!("Error: a security key named {label:?} is already enrolled.");
+            }
+            label
+        }
+        None => next_key_label(existing),
+    };
+
+    let authenticator = fido2::detect().with_context(|| {
+        format!(
+            "cannot enroll a security key: {}",
+            fido2::unavailable_reason()
+        )
+    })?;
+
+    let pin = if want_pin {
+        Some(prompt_hidden("Security key PIN: ")?)
+    } else {
+        None
+    };
+
+    let salt = fido2::random_salt();
+    eprintln!(
+        "Registering with your {}. You may be asked to touch it twice.",
+        authenticator.describe()
+    );
+    let enrollment = authenticator.enroll(fido2::RP_ID, &salt, pin.as_deref())?;
+
+    Ok(Fido2Slot {
+        label,
+        rp_id: fido2::RP_ID.to_string(),
+        credential_id: enrollment.credential_id,
+        salt,
+        requires_pin: pin.is_some(),
+        ciphertext: encrypt_slot_with_key(secret, &enrollment.secret)?,
+    })
+}
+
+/// First free name in the security-key, security-key-2, … series.
+fn next_key_label(existing: &[Fido2Slot]) -> String {
+    let taken = |name: &str| existing.iter().any(|s| s.label == name);
+    if !taken("security-key") {
+        return "security-key".to_string();
+    }
+    (2..)
+        .map(|n| format!("security-key-{n}"))
+        .find(|name| !taken(name))
+        .expect("the series is unbounded")
+}
+
+fn cmd_passkey_add_key(
+    identity_file: &std::path::Path,
+    label: Option<String>,
+    want_pin: bool,
+) -> Result<()> {
+    let mut locked = read_locked_identity(identity_file)?;
+    // Proving you can already open the identity is what stops a passer-by
+    // from adding their own key to your store.
+    let secret = auth::CliUnlocker.unlock(&locked)?;
+
+    let slot = enroll_security_key(&secret, &locked.fido2_slots, label, want_pin)?;
+    let name = slot.label.clone();
+    locked.fido2_slots.push(slot);
+    write_identity_file(identity_file, &locked.serialize())?;
+
+    println!("Enrolled security key \"{name}\".");
+    print_slots(&locked);
+    Ok(())
+}
+
+fn cmd_passkey_remove_key(identity_file: &std::path::Path, label: &str) -> Result<()> {
+    let mut locked = read_locked_identity(identity_file)?;
+    if locked.fido2_slot(label).is_none() {
+        bail!("Error: no security key named {label:?} is enrolled.");
+    }
+    locked.fido2_slots.retain(|s| s.label != label);
+    if locked.slot_count() == 0 {
+        bail!(
+            "Error: {label:?} is the only way to unlock this identity. Run \
+             \"nopass passkey disable\" to unlock it instead."
+        );
+    }
+    write_identity_file(identity_file, &locked.serialize())?;
+
+    println!("Removed security key \"{label}\".");
+    print_slots(&locked);
+    Ok(())
+}
+
+/// Read a locked identity file, refusing plaintext ones with a hint.
+fn read_locked_identity(identity_file: &std::path::Path) -> Result<LockedIdentity> {
+    let contents = std::fs::read_to_string(identity_file)
+        .with_context(|| format!("no identity found at {}", identity_file.display()))?;
+    if !LockedIdentity::is_locked_file(&contents) {
+        bail!("The identity is not locked. Run \"nopass passkey enroll\" first.");
+    }
+    Ok(LockedIdentity::parse(&contents)?)
+}
+
+fn print_slots(locked: &LockedIdentity) {
+    println!("Slots:");
+    if locked.has_keychain() {
+        println!("  - Touch ID (macOS Secure Enclave)");
+    }
+    for slot in &locked.fido2_slots {
+        let pin = if slot.requires_pin { " + PIN" } else { "" };
+        println!(
+            "  - security key \"{}\" (FIDO2 hmac-secret, credential {}{pin})",
+            slot.label,
+            short_id(&slot.credential_id),
+        );
+    }
+    if locked.has_passphrase() {
+        println!("  - passphrase");
+    }
+}
+
+/// First few bytes of a credential id, enough to tell two keys apart.
+fn short_id(credential_id: &[u8]) -> String {
+    credential_id
+        .iter()
+        .take(4)
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+        + "…"
 }
 
 #[cfg(all(target_os = "macos", feature = "touchid"))]
@@ -400,7 +589,7 @@ fn enroll_touchid_slot(secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
 fn enroll_touchid_slot(_secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
     if !no_touchid {
         eprintln!(
-            "Note: Touch ID support is not built in; locking with passphrase only. \
+            "Note: Touch ID support is not built in; skipping that slot. \
              (Rebuild with --features touchid on macOS to enable it.)"
         );
     }
@@ -408,12 +597,7 @@ fn enroll_touchid_slot(_secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
 }
 
 fn cmd_passkey_disable(identity_file: &std::path::Path) -> Result<()> {
-    let contents = std::fs::read_to_string(identity_file)
-        .with_context(|| format!("no identity found at {}", identity_file.display()))?;
-    if !LockedIdentity::is_locked_file(&contents) {
-        bail!("The identity is not locked.");
-    }
-    let locked = LockedIdentity::parse(&contents)?;
+    let locked = read_locked_identity(identity_file)?;
     let secret = auth::CliUnlocker.unlock(&locked)?;
     let public = crypto::write_plaintext_identity(identity_file, &secret)?;
     remove_touchid_slot();
@@ -437,17 +621,14 @@ fn cmd_passkey_status(identity_file: &std::path::Path) -> Result<()> {
         return Ok(());
     };
     if !LockedIdentity::is_locked_file(&contents) {
-        println!("Identity is unlocked (plaintext on disk). Run \"nopass passkey enroll\" to lock it.");
+        println!(
+            "Identity is unlocked (plaintext on disk). Run \"nopass passkey enroll\" to lock it."
+        );
         return Ok(());
     }
     let locked = LockedIdentity::parse(&contents)?;
-    println!("Identity is locked. Slots:");
-    if locked.has_keychain() {
-        println!("  - Touch ID (macOS Secure Enclave)");
-    }
-    if locked.has_passphrase() {
-        println!("  - passphrase");
-    }
+    println!("Identity is locked.");
+    print_slots(&locked);
     Ok(())
 }
 

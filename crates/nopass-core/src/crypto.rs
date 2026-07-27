@@ -128,7 +128,9 @@ pub fn read_identity_secret(path: &Path) -> Result<String> {
     contents
         .lines()
         .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with('#') && l.parse::<age::x25519::Identity>().is_ok())
+        .find(|l| {
+            !l.is_empty() && !l.starts_with('#') && l.parse::<age::x25519::Identity>().is_ok()
+        })
         .map(str::to_string)
         .ok_or_else(|| Error::NoIdentity(path.to_path_buf()))
 }
@@ -410,8 +412,11 @@ mod tests {
 
         // Lock the identity into a passphrase slot.
         let locked = LockedIdentity {
-            passphrase_slot: Some(encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap()),
+            passphrase_slot: Some(
+                encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap(),
+            ),
             keychain_slot: None,
+            ..Default::default()
         };
         std::fs::write(&id_file, locked.serialize()).unwrap();
 
@@ -435,7 +440,8 @@ mod tests {
                 )
             }
         }
-        let unlocked = NativeCrypto::with_identity_file(id_file).with_unlocker(Box::new(PwUnlocker));
+        let unlocked =
+            NativeCrypto::with_identity_file(id_file).with_unlocker(Box::new(PwUnlocker));
         assert_eq!(unlocked.decrypt(&file).unwrap(), b"hi\n");
     }
 
@@ -451,8 +457,11 @@ mod tests {
         assert!(secret.parse::<age::x25519::Identity>().is_ok());
 
         let locked = LockedIdentity {
-            passphrase_slot: Some(encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap()),
+            passphrase_slot: Some(
+                encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap(),
+            ),
             keychain_slot: None,
+            ..Default::default()
         };
         std::fs::write(&id_file, locked.serialize()).unwrap();
         assert!(matches!(read_identity_secret(&id_file), Err(Error::Locked)));

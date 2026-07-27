@@ -11,6 +11,9 @@ repository = "https://github.com/souravsspace/nopass"
 [workspace.dependencies]
 age = "0.11"
 base64 = "0.21"
+ctap-hid-fido2 = "3.5"
+hmac = "0.12"
+sha2 = "0.10"
 thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
