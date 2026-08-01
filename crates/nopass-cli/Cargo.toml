@@ -13,8 +13,12 @@ path = "src/main.rs"
 [dependencies]
 nopass-core = { path = "../nopass-core" }
 anyhow.workspace = true
+base64.workspace = true
 clap.workspace = true
+hmac.workspace = true
 rand.workspace = true
+sha2.workspace = true
+ctap-hid-fido2 = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -22,6 +26,10 @@ default = []
 # build with keychain entitlements to function at runtime; the passphrase
 # slot works without it.
 touchid = ["dep:security-framework", "dep:security-framework-sys"]
+# FIDO2 security key (passkey) unlock slot, over USB HID. Off by default
+# because it pulls in a C HID stack (libudev on Linux); the passphrase slot
+# works without it.
+security-key = ["dep:ctap-hid-fido2"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"], optional = true }

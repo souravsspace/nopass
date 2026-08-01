@@ -208,7 +208,11 @@ nopass mv [-f] old new                   move + re-encrypt
 nopass cp [-f] old new                   copy + re-encrypt
 nopass git <args>...                     run any git command in the store
 nopass update [--check]                  update nopass itself
-nopass passkey enroll [--no-touchid]     lock the identity behind auth
+nopass passkey enroll [--security-key] [--pin] [--no-touchid]
+                                         lock the identity behind auth
+nopass passkey add-key [--label name] [--pin]
+                                         enroll another security key
+nopass passkey remove-key name           drop a security key slot
 nopass passkey disable                   remove the lock (requires auth)
 nopass passkey status                    show lock state and slots
 ```
@@ -222,7 +226,8 @@ anything that can read it can decrypt your store. To require authentication on
 every access, **lock** the identity:
 
 ```sh
-nopass passkey enroll        # choose a passphrase (and Touch ID on macOS)
+nopass passkey enroll                   # passphrase (and Touch ID on macOS)
+nopass passkey enroll --security-key    # …plus a FIDO2 key, e.g. a YubiKey
 ```
 
 After enrolling, the identity file is itself encrypted. Every command that
@@ -234,12 +239,16 @@ slot recovers the identity.
 
 - **Passphrase slot** — always created, works on every platform. The
   passphrase is run through scrypt; the identity is sealed with age.
+- **Security key slots** *(FIDO2, optional)* — any number of hardware keys,
+  via the CTAP2 `hmac-secret` extension. See below.
 - **Touch ID slot** *(macOS, optional)* — a non-extractable key in the Secure
   Enclave, gated by Touch ID. Build with `--features touchid` and a
   **code-signed** binary with keychain entitlements; an unsigned build (plain
-  `cargo install`) can't create Secure Enclave keys, so enrollment falls back
-  to passphrase-only. When both slots exist, Touch ID is tried first and the
-  passphrase is the fallback.
+  `cargo install`) can't create Secure Enclave keys, so that slot is skipped.
+
+Unlocking tries Touch ID, then any enrolled security key, then the passphrase,
+falling through whenever a factor is missing or refuses. `NOPASS_UNLOCK=passphrase`
+skips straight to typing.
 
 ```sh
 nopass passkey status        # see whether it's locked and which slots exist
@@ -247,7 +256,39 @@ nopass passkey disable       # unlock (prompts), then store plaintext again
 ```
 
 Re-running `enroll` on an already-locked identity unlocks it first, so you can
-change the passphrase or add the Touch ID slot later.
+change the passphrase or add slots later.
+
+### Security keys (passkeys)
+
+A FIDO2 security key becomes a slot that unlocks the store with a touch and no
+typing:
+
+```sh
+cargo install --path crates/nopass-cli --features security-key
+
+nopass passkey enroll --security-key           # lock, enrolling a key
+nopass passkey add-key --label backup          # add a second key later
+nopass passkey remove-key backup               # and drop it again
+```
+
+How it works: enrollment creates a credential on the key with the CTAP2
+`hmac-secret` extension, then asks it for `HMAC-SHA256(credRandom, salt)` over
+a random 32-byte salt (so you may be prompted to touch twice — CTAP only
+returns the HMAC from an assertion, never from registration). That output is a
+uniform 256-bit key and seals the slot. The identity file records only the
+credential id and the salt, both public; `credRandom` never leaves the key, so
+the slot cannot be opened without the physical device.
+
+- Add `--pin` to require the key's PIN as well as a touch.
+- Enroll **more than one key** if you rely on this — a key that is lost, wiped
+  or reset takes its slot with it.
+- The passphrase slot is always kept as a fallback, so a forgotten key at the
+  office never locks you out of your own store.
+- The `security-key` feature is off by default because it pulls in a C HID
+  stack (on Linux, `libudev` headers are needed to build).
+
+Slots recorded by a newer nopass are ignored rather than fatal to an older
+one, so a store shared across machines keeps working while you roll out.
 
 ## Configuration
 
@@ -265,6 +306,8 @@ All optional, via environment variables:
 | `NOPASS_CHARACTER_SET_NO_SYMBOLS` | alnum | charset for `generate -n` |
 | `NOPASS_CLIP_TIME` | `45` | seconds before clipboard clears |
 | `NOPASS_GPG_OPTS` | — | extra flags for the gpg backend |
+| `NOPASS_UNLOCK` | — | `passphrase` skips Touch ID and security keys |
+| `NOPASS_FIDO2_MOCK` | — | software test authenticator state file (tests only) |
 
 `EDITOR` picks the editor for `nopass edit` (default `vi`). Clipboard uses
 `pbcopy` on macOS, `wl-copy` on Wayland, `xclip` on X11.
@@ -295,8 +338,11 @@ All optional, via environment variables:
 - Entry **names are not encrypted** (they're file names). Don't put secrets
   in entry names.
 - By default the secret identity is stored unencrypted (mode 0600). Run
-  `nopass passkey enroll` to encrypt it behind a passphrase and/or Touch ID so
-  access requires authentication.
+  `nopass passkey enroll` to encrypt it behind a passphrase, a FIDO2 security
+  key and/or Touch ID so access requires authentication.
+- `NOPASS_FIDO2_MOCK` swaps the real authenticator for a file-backed software
+  one. It exists for the test suite — like `NOPASS_BACKEND=plain` — and warns
+  loudly; slots enrolled that way are only as safe as that file.
 - The clipboard is cleared after `NOPASS_CLIP_TIME` seconds, but other apps
   may read the clipboard during that window.
 - `nopass edit` writes plaintext to a temp dir (`/dev/shm` ramdisk when
