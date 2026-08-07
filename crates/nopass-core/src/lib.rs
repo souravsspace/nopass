@@ -2,6 +2,7 @@
 //! manager. Entries are individually encrypted files in a directory tree,
 //! with per-directory recipient files and automatic git commits.
 
+pub mod agent;
 pub mod config;
 pub mod crypto;
 pub mod error;
