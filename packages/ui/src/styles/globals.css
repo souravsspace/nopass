@@ -4,100 +4,108 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * nopass reads as a tool, not a product tour: dense, quiet, and unhurried.
- * The palette is near-neutral so the one accent — a desaturated teal that
- * says "verified" without borrowing the blue every dashboard already uses —
- * is the only thing that pulls the eye. Secrets are always monospace, so a
- * password never has to be squinted at to be checked.
+ * The scene: someone glances at a 360px popup for two seconds, mid-login, on
+ * a laptop in a bright room. Light by default; dark is honoured, not assumed.
+ *
+ * Every password manager reaches for teal, green or neon-on-black. This one
+ * does not. Neutrals are tinted toward a plum hue and one restrained plum
+ * accent carries under a tenth of the surface, so the eye goes to the entry
+ * being filled rather than to the chrome around it.
+ *
+ * Lock state is never carried by hue alone: locked is muted and outlined with
+ * a closed padlock and the word, unlocked is filled. It survives a colourblind
+ * user and a greyscale screenshot.
+ *
+ * Secrets are always monospace, so an l and a 1 never have to be guessed at.
  */
 
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(0.995 0 0);
-  --foreground: oklch(0.21 0.006 285.9);
+  --background: oklch(0.993 0.002 340);
+  --foreground: oklch(0.22 0.008 340);
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.006 285.9);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 285.9);
+  --card: oklch(0.999 0.002 340);
+  --card-foreground: oklch(0.22 0.008 340);
+  --popover: oklch(0.999 0.002 340);
+  --popover-foreground: oklch(0.22 0.008 340);
 
-  --primary: oklch(0.55 0.096 191.5);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.48 0.138 345);
+  --primary-foreground: oklch(0.985 0.003 340);
 
-  --secondary: oklch(0.967 0.001 286.4);
-  --secondary-foreground: oklch(0.21 0.006 285.9);
+  --secondary: oklch(0.965 0.004 340);
+  --secondary-foreground: oklch(0.22 0.008 340);
 
-  --muted: oklch(0.967 0.001 286.4);
-  --muted-foreground: oklch(0.552 0.014 285.9);
+  --muted: oklch(0.965 0.004 340);
+  --muted-foreground: oklch(0.541 0.014 340);
 
-  --accent: oklch(0.955 0.014 191.5);
-  --accent-foreground: oklch(0.37 0.077 191.5);
+  --accent: oklch(0.955 0.019 345);
+  --accent-foreground: oklch(0.36 0.108 345);
 
-  --destructive: oklch(0.577 0.245 27.3);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.582 0.208 27.3);
+  --destructive-foreground: oklch(0.985 0.003 340);
 
-  --border: oklch(0.92 0.004 286.3);
-  --input: oklch(0.92 0.004 286.3);
-  --ring: oklch(0.55 0.096 191.5);
+  --border: oklch(0.915 0.005 340);
+  --input: oklch(0.915 0.005 340);
+  --ring: oklch(0.48 0.138 345);
 
   /* Lock state has to be legible at a glance in a 32px toolbar icon. */
-  --locked: oklch(0.646 0.152 62.1);
-  --locked-foreground: oklch(0.985 0 0);
-  --unlocked: oklch(0.55 0.096 191.5);
-  --unlocked-foreground: oklch(0.985 0 0);
+  --locked: oklch(0.541 0.014 340);
+  --locked-foreground: oklch(0.985 0.003 340);
+  --unlocked: oklch(0.48 0.138 345);
+  --unlocked-foreground: oklch(0.985 0.003 340);
 
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.21 0.006 285.9);
-  --sidebar-primary: oklch(0.55 0.096 191.5);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.4);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
-  --sidebar-border: oklch(0.92 0.004 286.3);
-  --sidebar-ring: oklch(0.55 0.096 191.5);
+  --sidebar: oklch(0.978 0.003 340);
+  --sidebar-foreground: oklch(0.22 0.008 340);
+  --sidebar-primary: oklch(0.48 0.138 345);
+  --sidebar-primary-foreground: oklch(0.985 0.003 340);
+  --sidebar-accent: oklch(0.965 0.004 340);
+  --sidebar-accent-foreground: oklch(0.22 0.008 340);
+  --sidebar-border: oklch(0.915 0.005 340);
+  --sidebar-ring: oklch(0.48 0.138 345);
 }
 
 .dark {
-  --background: oklch(0.17 0.005 285.9);
-  --foreground: oklch(0.96 0.001 286.4);
+  --background: oklch(0.163 0.006 340);
+  --foreground: oklch(0.955 0.003 340);
 
-  --card: oklch(0.21 0.006 285.9);
-  --card-foreground: oklch(0.96 0.001 286.4);
-  --popover: oklch(0.21 0.006 285.9);
-  --popover-foreground: oklch(0.96 0.001 286.4);
+  --card: oklch(0.206 0.008 340);
+  --card-foreground: oklch(0.955 0.003 340);
+  --popover: oklch(0.206 0.008 340);
+  --popover-foreground: oklch(0.955 0.003 340);
 
-  --primary: oklch(0.72 0.098 191.5);
-  --primary-foreground: oklch(0.19 0.02 191.5);
+  --primary: oklch(0.723 0.128 345);
+  --primary-foreground: oklch(0.18 0.032 345);
 
-  --secondary: oklch(0.27 0.006 286);
-  --secondary-foreground: oklch(0.96 0.001 286.4);
+  --secondary: oklch(0.266 0.009 340);
+  --secondary-foreground: oklch(0.955 0.003 340);
 
-  --muted: oklch(0.27 0.006 286);
-  --muted-foreground: oklch(0.712 0.013 286.1);
+  --muted: oklch(0.266 0.009 340);
+  --muted-foreground: oklch(0.706 0.014 340);
 
-  --accent: oklch(0.3 0.028 191.5);
-  --accent-foreground: oklch(0.88 0.056 191.5);
+  --accent: oklch(0.297 0.036 345);
+  --accent-foreground: oklch(0.874 0.07 345);
 
-  --destructive: oklch(0.704 0.191 22.2);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.186 22.2);
+  --destructive-foreground: oklch(0.985 0.003 340);
 
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.72 0.098 191.5);
+  --border: oklch(0.955 0.003 340 / 11%);
+  --input: oklch(0.955 0.003 340 / 16%);
+  --ring: oklch(0.723 0.128 345);
 
-  --locked: oklch(0.769 0.153 70.1);
-  --locked-foreground: oklch(0.21 0.03 70.1);
-  --unlocked: oklch(0.72 0.098 191.5);
-  --unlocked-foreground: oklch(0.19 0.02 191.5);
+  --locked: oklch(0.706 0.014 340);
+  --locked-foreground: oklch(0.163 0.006 340);
+  --unlocked: oklch(0.723 0.128 345);
+  --unlocked-foreground: oklch(0.18 0.032 345);
 
-  --sidebar: oklch(0.21 0.006 285.9);
-  --sidebar-foreground: oklch(0.96 0.001 286.4);
-  --sidebar-primary: oklch(0.72 0.098 191.5);
-  --sidebar-primary-foreground: oklch(0.19 0.02 191.5);
-  --sidebar-accent: oklch(0.27 0.006 286);
-  --sidebar-accent-foreground: oklch(0.96 0.001 286.4);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.72 0.098 191.5);
+  --sidebar: oklch(0.206 0.008 340);
+  --sidebar-foreground: oklch(0.955 0.003 340);
+  --sidebar-primary: oklch(0.723 0.128 345);
+  --sidebar-primary-foreground: oklch(0.18 0.032 345);
+  --sidebar-accent: oklch(0.266 0.009 340);
+  --sidebar-accent-foreground: oklch(0.955 0.003 340);
+  --sidebar-border: oklch(0.955 0.003 340 / 11%);
+  --sidebar-ring: oklch(0.723 0.128 345);
 }
 
 @theme inline {
