@@ -1174,17 +1174,25 @@ fn first_run_says_where_the_key_goes_and_locks_it() {
 #[test]
 fn first_run_can_put_the_key_in_a_directory_of_your_choosing() {
     let machine = FreshMachine::new();
-    let keys = machine.dir.path().join("my keys/nopass");
+    // Somewhere general-purpose, the way someone answers "Desktop".
+    let chosen = machine.dir.path().join("Desktop");
+    std::fs::create_dir_all(&chosen).unwrap();
 
     machine
         .cmd()
         .arg("init")
-        .write_stdin(format!("2\n{}\nmaster\nmaster\n", keys.display()))
+        .write_stdin(format!("2\n{}\nmaster\nmaster\n", chosen.display()))
         .assert()
         .success()
         .stdout(predicate::str::contains("Remembered:"));
 
-    let identity = keys.join("identity.txt");
+    // nopass makes its own folder rather than dropping a bare identity.txt
+    // into the directory it was handed.
+    let identity = chosen.join("nopass/identity.txt");
+    assert!(
+        !chosen.join("identity.txt").exists(),
+        "the key must not sit loose in the directory the user named"
+    );
     assert!(
         is_locked(&identity),
         "the chosen location should hold the key"
@@ -1572,4 +1580,48 @@ fn editing_an_entry_asks_once_even_though_it_decrypts_twice() {
         .assert()
         .success()
         .stdout("edited\n");
+}
+
+#[test]
+fn a_directory_named_nopass_is_used_as_is() {
+    // Answering with a folder you already made for nopass should not
+    // produce keys/nopass/nopass/identity.txt.
+    let machine = FreshMachine::new();
+    let chosen = machine.dir.path().join("keys/nopass");
+
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin(format!("2\n{}\nmaster\nmaster\n", chosen.display()))
+        .assert()
+        .success();
+
+    assert!(is_locked(&chosen.join("identity.txt")));
+    assert!(!chosen.join("nopass").exists(), "no doubled nopass folder");
+}
+
+#[test]
+fn a_trailing_slash_on_the_identity_flag_means_directory() {
+    let machine = FreshMachine::new();
+    let chosen = machine.dir.path().join("Vaults");
+
+    machine
+        .cmd()
+        .args(["init", "--identity", &format!("{}/", chosen.display())])
+        .write_stdin("master\nmaster\n")
+        .assert()
+        .success();
+
+    // Same rule as the wizard: the flag gets nopass its own folder.
+    assert!(is_locked(&chosen.join("nopass/identity.txt")));
+    assert!(!chosen.join("identity.txt").exists());
+
+    machine.insert("gmail", "hunter2");
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
 }
