@@ -1102,6 +1102,7 @@ dependencies = [
  "rand 0.9.4",
  "sha2",
  "tempfile",
+ "zeroize",
 ]
 
 [[package]]
@@ -1114,6 +1115,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "walkdir",
+ "zeroize",
 ]
 
 [[package]]
