@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
 use age::secrecy::ExposeSecret;
+use zeroize::Zeroizing;
 
 use crate::config;
 use crate::error::{Error, Result};
@@ -35,8 +36,9 @@ pub struct NativeCrypto {
     /// of this process only. A single command can decrypt many entries —
     /// `grep` reads the whole store, `init` re-encrypts it — and asking for
     /// the passphrase once per file would be unusable. Nothing is written
-    /// anywhere, so the next command asks again.
-    unlocked: Mutex<Option<String>>,
+    /// anywhere, so the next command asks again, and the copy here is wiped
+    /// rather than left in freed memory.
+    unlocked: Mutex<Option<Zeroizing<String>>>,
 }
 
 impl NativeCrypto {
@@ -80,7 +82,7 @@ impl NativeCrypto {
                 let locked = LockedIdentity::parse(&contents)
                     .map_err(|_| Error::MalformedLock(self.identity_file.clone()))?;
                 let unlocker = self.unlocker.as_ref().ok_or(Error::Locked)?;
-                *cached = Some(unlocker.unlock(&locked)?);
+                *cached = Some(Zeroizing::new(unlocker.unlock(&locked)?));
             }
             let ids = Self::parse_identities(cached.as_deref().expect("just unlocked"));
             if ids.is_empty() {
