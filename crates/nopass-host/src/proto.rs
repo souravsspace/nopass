@@ -16,14 +16,26 @@ pub const MIN_PASSWORD_LENGTH: usize = 8;
 pub const MAX_PASSWORD_LENGTH: usize = 1024;
 
 /// The verbs this host knows about. Anything else is `unsupported_verb`.
-pub const KNOWN_VERBS: &[&str] =
-    &["hello", "status", "unlock", "lock", "list", "search", "get", "generate"];
+pub const KNOWN_VERBS: &[&str] = &[
+    "hello", "status", "unlock", "lock", "list", "search", "get", "generate",
+];
 
 /// Verbs a caller might reasonably expect but which this host refuses on
 /// principle rather than by accident (ADR-0002). Named so the refusal can say
 /// *read-only* instead of *never heard of it*.
-pub const MUTATING_VERBS: &[&str] =
-    &["insert", "edit", "rm", "remove", "delete", "mv", "rename", "cp", "copy", "init", "generate_into"];
+pub const MUTATING_VERBS: &[&str] = &[
+    "insert",
+    "edit",
+    "rm",
+    "remove",
+    "delete",
+    "mv",
+    "rename",
+    "cp",
+    "copy",
+    "init",
+    "generate_into",
+];
 
 /// Serialises as `true` and refuses to deserialise from anything else — the
 /// serde counterpart of Zod's `z.literal(true)`.
@@ -37,17 +49,25 @@ pub struct No;
 macro_rules! literal_bool {
     ($name:ident, $value:literal) => {
         impl Serialize for $name {
-            fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            fn serialize<S: Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
                 serializer.serialize_bool($value)
             }
         }
 
         impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+            fn deserialize<D: Deserializer<'de>>(
+                deserializer: D,
+            ) -> std::result::Result<Self, D::Error> {
                 if bool::deserialize(deserializer)? == $value {
                     Ok($name)
                 } else {
-                    Err(serde::de::Error::custom(concat!("expected ", stringify!($value))))
+                    Err(serde::de::Error::custom(concat!(
+                        "expected ",
+                        stringify!($value)
+                    )))
                 }
             }
         }
@@ -63,14 +83,36 @@ literal_bool!(No, false);
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    Hello { id: u32, version: u32 },
-    Status { id: u32 },
-    Unlock { id: u32, passphrase: String },
-    Lock { id: u32 },
-    List { id: u32 },
-    Search { id: u32, origin: String },
-    Get { id: u32, entry: String },
-    Generate { id: u32, length: usize, symbols: bool },
+    Hello {
+        id: u32,
+        version: u32,
+    },
+    Status {
+        id: u32,
+    },
+    Unlock {
+        id: u32,
+        passphrase: String,
+    },
+    Lock {
+        id: u32,
+    },
+    List {
+        id: u32,
+    },
+    Search {
+        id: u32,
+        origin: String,
+    },
+    Get {
+        id: u32,
+        entry: String,
+    },
+    Generate {
+        id: u32,
+        length: usize,
+        symbols: bool,
+    },
 }
 
 impl Request {
@@ -149,14 +191,51 @@ pub struct Secret {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Success {
-    Hello { id: u32, ok: Yes, version: u32, store: StoreState },
-    Status { id: u32, ok: Yes, state: LockState, #[serde(rename = "expiresIn")] expires_in: u64 },
-    Unlock { id: u32, ok: Yes, state: LockState, #[serde(rename = "expiresIn")] expires_in: u64 },
-    Lock { id: u32, ok: Yes, state: LockState },
-    List { id: u32, ok: Yes, entries: Vec<String> },
-    Search { id: u32, ok: Yes, matches: Vec<Match> },
-    Get { id: u32, ok: Yes, entry: Secret },
-    Generate { id: u32, ok: Yes, password: String },
+    Hello {
+        id: u32,
+        ok: Yes,
+        version: u32,
+        store: StoreState,
+    },
+    Status {
+        id: u32,
+        ok: Yes,
+        state: LockState,
+        #[serde(rename = "expiresIn")]
+        expires_in: u64,
+    },
+    Unlock {
+        id: u32,
+        ok: Yes,
+        state: LockState,
+        #[serde(rename = "expiresIn")]
+        expires_in: u64,
+    },
+    Lock {
+        id: u32,
+        ok: Yes,
+        state: LockState,
+    },
+    List {
+        id: u32,
+        ok: Yes,
+        entries: Vec<String>,
+    },
+    Search {
+        id: u32,
+        ok: Yes,
+        matches: Vec<Match>,
+    },
+    Get {
+        id: u32,
+        ok: Yes,
+        entry: Secret,
+    },
+    Generate {
+        id: u32,
+        ok: Yes,
+        password: String,
+    },
 }
 
 /// Machine-readable failure reasons. The extension branches on the code; the
@@ -211,8 +290,15 @@ pub fn parse_response(value: &Value) -> Result<Response> {
 
 /// Build a failure reply. Kept here so every refusal has the same shape.
 pub fn failure(id: u32, code: ErrorCode, message: impl Into<String>) -> Value {
-    serde_json::to_value(Failure { id, ok: No, error: ErrorBody { code, message: message.into() } })
-        .expect("a failure always serialises")
+    serde_json::to_value(Failure {
+        id,
+        ok: No,
+        error: ErrorBody {
+            code,
+            message: message.into(),
+        },
+    })
+    .expect("a failure always serialises")
 }
 
 /// Build a success reply.
