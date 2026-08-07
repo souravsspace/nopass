@@ -68,19 +68,52 @@ flow lives in [RELEASING.md](RELEASING.md).
 nopass init
 ```
 
-That's it. This generates an encryption keypair (if you don't have one),
-prints your public key, and creates the store at `~/.nopass`. Your secret
-key lives at `~/.config/nopass/identity.txt`.
+The first run asks you two things:
 
-> **Back up `~/.config/nopass/identity.txt` somewhere safe.** Anyone with
-> this file can read your passwords; without it, nobody can — including you.
+```
+Where should the private key live?
+  [1] /home/you/.config/nopass/identity.txt   (default)
+  [2] a directory you choose
+Choice [1]:
 
-You can also generate the key explicitly first:
+Choose a master passphrase. nopass asks for it every time it reads
+a password, and it is the only thing protecting the key file.
+
+Master passphrase:
+Retype master passphrase:
+```
+
+Then it prints where the key went, your public key, and creates the store at
+`~/.nopass`. Everything you store is encrypted to that one keypair, and the
+secret half is written **already locked** with your passphrase — it never
+touches the disk in the clear.
+
+> **Back up the private key file somewhere safe.** Without it — or without
+> the passphrase — nobody can read your passwords, including you.
+
+Pick option 2 and nopass remembers the location in
+`~/.config/nopass/config`, so every later command finds it with no
+environment variables to set. You can also say it up front:
 
 ```sh
-nopass keygen            # prints your public key (age1...)
-nopass keygen --force    # replace existing key (old entries become unreadable!)
+nopass init --identity ~/Vaults/keys        # a directory: keeps identity.txt inside
+nopass init --identity ~/Vaults/work.txt    # or an exact filename
 ```
+
+Reading a password asks for the passphrase every time, like `pass` does.
+Nothing is cached between commands; within one command it asks once, however
+many entries that command has to decrypt.
+
+You can also create the key explicitly first, or skip the passphrase:
+
+```sh
+nopass keygen                     # same questions, without creating the store
+nopass keygen --force             # replace existing key (old entries become unreadable!)
+nopass init --no-passphrase       # unattended: unprotected key, never prompts
+```
+
+`--no-passphrase` leaves the key readable by anything that can read the file.
+Lock it later with `nopass passkey enroll` (see below).
 
 ### 2. Turn on history and sync (recommended)
 
@@ -192,8 +225,10 @@ re-encrypts it automatically.
 ## Command reference
 
 ```
-nopass keygen [--force]                  generate this machine's keypair
-nopass init [-p subfolder] [recipients]  initialize store (auto-keygen if needed)
+nopass keygen [--force] [--identity path] [--no-passphrase]
+                                         generate this machine's keypair
+nopass init [-p subfolder] [--identity path] [--no-passphrase] [recipients]
+                                         initialize store (auto-keygen if needed)
 nopass [ls] [subfolder]                  list entries as a tree
 nopass [show] [-c[line]] name            decrypt and print (or copy to clipboard)
 nopass find terms...                     list entries matching terms
@@ -221,18 +256,23 @@ Aliases: `ls`=`list`, `rm`=`remove`/`delete`, `mv`=`rename`, `cp`=`copy`.
 
 ## Locking your identity (passkey)
 
-By default your secret identity file sits on disk readable by your user, so
-anything that can read it can decrypt your store. To require authentication on
-every access, **lock** the identity:
+A key made by `nopass init` is already locked with the master passphrase you
+chose. `passkey` is how you change what opens it — add Touch ID or a security
+key, change the passphrase, or lock a key that was created with
+`--no-passphrase`:
 
 ```sh
 nopass passkey enroll                   # passphrase (and Touch ID on macOS)
 nopass passkey enroll --security-key    # …plus a FIDO2 key, e.g. a YubiKey
 ```
 
-After enrolling, the identity file is itself encrypted. Every command that
-decrypts an entry (`show`, `grep`, `edit`, `generate -i`, `mv`, `cp`) prompts
-to unlock first — reading the file directly no longer reveals the key.
+Running `enroll` on an already-locked identity asks to unlock it first, then
+re-locks it with the new passphrase — that is how you change it.
+
+Every command that decrypts an entry (`show`, `grep`, `edit`, `generate -i`,
+`mv`, `cp`) prompts to unlock first; reading the identity file directly
+reveals nothing. Writing (`insert`, `generate`) needs only the public key, so
+it never prompts.
 
 Locking uses independent **slots**, like disk encryption: unlocking any one
 slot recovers the identity.
@@ -297,7 +337,8 @@ All optional, via environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `NOPASS_DIR` | `~/.nopass` | store location |
-| `NOPASS_IDENTITY` | `~/.config/nopass/identity.txt` | secret key file |
+| `NOPASS_IDENTITY` | config file, else `~/.config/nopass/identity.txt` | secret key file |
+| `NOPASS_CONFIG` | `~/.config/nopass/config` | file recording the key location |
 | `NOPASS_BACKEND` | `native` | `native`, `gpg`, or `plain` (tests only) |
 | `NOPASS_AUTOSYNC` | `1` | `0` disables auto pull/push to the remote |
 | `NOPASS_KEY` | — | override recipients for all encryption |
@@ -337,9 +378,12 @@ All optional, via environment variables:
 
 - Entry **names are not encrypted** (they're file names). Don't put secrets
   in entry names.
-- By default the secret identity is stored unencrypted (mode 0600). Run
-  `nopass passkey enroll` to encrypt it behind a passphrase, a FIDO2 security
-  key and/or Touch ID so access requires authentication.
+- The secret identity is encrypted at rest with your master passphrase (mode
+  0600) unless you created it with `--no-passphrase`. Run
+  `nopass passkey enroll` to add a FIDO2 security key and/or Touch ID, or to
+  lock a key that was created unprotected.
+- The unlocked key is held in memory for the life of a single command and
+  never cached on disk, so each new command authenticates again.
 - `NOPASS_FIDO2_MOCK` swaps the real authenticator for a file-backed software
   one. It exists for the test suite — like `NOPASS_BACKEND=plain` — and warns
   loudly; slots enrolled that way are only as safe as that file.
