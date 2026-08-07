@@ -354,8 +354,10 @@ impl NativeStore {
         let mut cmd = Command::cargo_bin("nopass").unwrap();
         cmd.env("NOPASS_DIR", self.dir.path().join("store"))
             .env("NOPASS_IDENTITY", self.dir.path().join("identity.txt"))
+            .env("NOPASS_AGENT_SOCK", self.dir.path().join("agent.sock"))
             .env_remove("NOPASS_BACKEND")
             .env_remove("NOPASS_KEY")
+            .env_remove("NOPASS_CACHE_TTL")
             .env_remove("NOPASS_FIDO2_MOCK")
             .env_remove("NOPASS_UNLOCK");
         cmd
@@ -1094,12 +1096,22 @@ impl FreshMachine {
         let mut cmd = Command::cargo_bin("nopass").unwrap();
         cmd.env("HOME", self.home())
             .env("NOPASS_DIR", self.dir.path().join("store"))
+            .env("NOPASS_AGENT_SOCK", self.dir.path().join("agent.sock"))
             .env_remove("NOPASS_IDENTITY")
             .env_remove("NOPASS_CONFIG")
             .env_remove("NOPASS_BACKEND")
             .env_remove("NOPASS_KEY")
+            .env_remove("NOPASS_CACHE_TTL")
             .env_remove("NOPASS_FIDO2_MOCK")
             .env_remove("NOPASS_UNLOCK");
+        cmd
+    }
+
+    /// A command allowed to reuse a passphrase cached by the agent for the
+    /// next `ttl` seconds. Caching is off unless asked for.
+    fn cmd_cached(&self, ttl: u64) -> Command {
+        let mut cmd = self.cmd();
+        cmd.env("NOPASS_CACHE_TTL", ttl.to_string());
         cmd
     }
 
@@ -1128,6 +1140,16 @@ impl FreshMachine {
         self.cmd()
             .args(["insert", "-e", name])
             .write_stdin(format!("{password}\n"))
+            .assert()
+            .success();
+    }
+
+    /// Insert into a store whose key is locked. Writing is a change to the
+    /// store, so the passphrase is answered first and the password second.
+    fn insert_locked(&self, passphrase: &str, name: &str, password: &str) {
+        self.cmd()
+            .args(["insert", "-e", name])
+            .write_stdin(format!("{passphrase}\n{password}\n"))
             .assert()
             .success();
     }
@@ -1203,7 +1225,7 @@ fn first_run_can_put_the_key_in_a_directory_of_your_choosing() {
     let config = std::fs::read_to_string(machine.config()).unwrap();
     assert!(config.contains(&identity.display().to_string()), "{config}");
 
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
     machine
         .cmd()
         .args(["show", "gmail"])
@@ -1283,7 +1305,7 @@ fn setup_refuses_an_empty_or_mistyped_passphrase() {
 fn the_passphrase_is_asked_for_on_every_command() {
     let machine = FreshMachine::new();
     machine.set_up_with("master");
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
 
     // Reading it works with the passphrase...
     machine
@@ -1317,9 +1339,9 @@ fn the_passphrase_is_asked_for_on_every_command() {
 fn one_command_asks_only_once_however_many_entries_it_reads() {
     let machine = FreshMachine::new();
     machine.set_up_with("master");
-    machine.insert("gmail", "hunter2");
-    machine.insert("bank", "hunter2");
-    machine.insert("work/vpn", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
+    machine.insert_locked("master", "bank", "hunter2");
+    machine.insert_locked("master", "work/vpn", "hunter2");
 
     // grep decrypts every entry in the store. One passphrase on stdin is
     // all it gets; if it re-asked per entry, the second read would fail.
@@ -1345,21 +1367,40 @@ fn one_command_asks_only_once_however_many_entries_it_reads() {
 }
 
 #[test]
-fn writing_a_password_needs_no_passphrase_at_all() {
-    // Encryption only needs the public key, exactly as with pass and gpg.
-    // The password itself is the only thing on stdin here.
+fn writing_a_password_asks_for_the_passphrase_too() {
+    // Encrypting only needs the public key, but adding to the store is a
+    // change to it, so nopass proves you are the owner first.
     let machine = FreshMachine::new();
     machine.set_up_with("master");
+
+    // The password alone is not enough: it is read as the passphrase, and
+    // then there is nothing left to store.
     machine
         .cmd()
         .args(["insert", "-e", "gmail"])
         .write_stdin("hunter2\n")
         .assert()
-        .success();
+        .failure();
     machine
         .cmd()
         .args(["generate", "bank", "20"])
         .write_stdin("")
+        .assert()
+        .failure();
+    assert!(!machine.dir.path().join("store/gmail.np").exists());
+    assert!(!machine.dir.path().join("store/bank.np").exists());
+
+    // Passphrase first, then the password.
+    machine
+        .cmd()
+        .args(["insert", "-e", "gmail"])
+        .write_stdin("master\nhunter2\n")
+        .assert()
+        .success();
+    machine
+        .cmd()
+        .args(["generate", "bank", "20"])
+        .write_stdin("master\n")
         .assert()
         .success();
 
@@ -1373,10 +1414,49 @@ fn writing_a_password_needs_no_passphrase_at_all() {
 }
 
 #[test]
+fn a_wrong_passphrase_writes_nothing() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+
+    machine
+        .cmd()
+        .args(["insert", "-e", "gmail"])
+        .write_stdin("not-it\nhunter2\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("authentication failed"));
+    assert!(!machine.dir.path().join("store/gmail.np").exists());
+}
+
+#[test]
+fn deleting_an_entry_asks_for_the_passphrase() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+
+    // Nothing to answer with, so nothing is deleted.
+    machine
+        .cmd()
+        .args(["rm", "-f", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+    assert!(machine.dir.path().join("store/gmail.np").exists());
+
+    machine
+        .cmd()
+        .args(["rm", "-f", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+    assert!(!machine.dir.path().join("store/gmail.np").exists());
+}
+
+#[test]
 fn moving_an_entry_reencrypts_after_a_single_prompt() {
     let machine = FreshMachine::new();
     machine.set_up_with("master");
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
 
     machine
         .cmd()
@@ -1410,7 +1490,7 @@ fn the_identity_flag_places_the_key_and_is_remembered() {
     let config = std::fs::read_to_string(machine.config()).unwrap();
     assert!(config.contains(&path.display().to_string()), "{config}");
 
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
     machine
         .cmd()
         .args(["show", "gmail"])
@@ -1498,12 +1578,12 @@ fn an_unprotected_key_can_be_locked_afterwards_and_unlocked_again() {
         .success()
         .stdout("hunter2\n");
 
-    // A locked identity still knows its own public key, so writing a new
-    // entry needs no unlocking.
+    // Writing a new entry now goes through the same lock: passphrase first,
+    // password second.
     machine
         .cmd()
         .args(["insert", "-e", "bank"])
-        .write_stdin("s3cret\n")
+        .write_stdin("master\ns3cret\n")
         .assert()
         .success();
     machine
@@ -1527,7 +1607,7 @@ fn an_unprotected_key_can_be_locked_afterwards_and_unlocked_again() {
 fn a_passphrase_can_be_changed_by_enrolling_again() {
     let machine = FreshMachine::new();
     machine.set_up_with("old-pass");
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("old-pass", "gmail", "hunter2");
 
     machine
         .cmd()
@@ -1558,7 +1638,7 @@ fn editing_an_entry_asks_once_even_though_it_decrypts_twice() {
 
     let machine = FreshMachine::new();
     machine.set_up_with("master");
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
 
     // An "editor" that replaces the file it is handed.
     let editor = machine.dir.path().join("fake-editor");
@@ -1616,7 +1696,7 @@ fn a_trailing_slash_on_the_identity_flag_means_directory() {
     assert!(is_locked(&chosen.join("nopass/identity.txt")));
     assert!(!chosen.join("identity.txt").exists());
 
-    machine.insert("gmail", "hunter2");
+    machine.insert_locked("master", "gmail", "hunter2");
     machine
         .cmd()
         .args(["show", "gmail"])
@@ -1624,6 +1704,200 @@ fn a_trailing_slash_on_the_identity_flag_means_directory() {
         .assert()
         .success()
         .stdout("hunter2\n");
+}
+
+// ---- the passphrase cache ----
+
+#[cfg(unix)]
+#[test]
+fn a_cached_passphrase_opens_the_next_read() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+
+    // The first read pays for the passphrase and hands it to the agent.
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+
+    // The next one asks nobody anything.
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+
+    // A command that has not opted in ignores the cache.
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+}
+
+#[cfg(unix)]
+#[test]
+fn the_cache_never_satisfies_a_change_to_the_store() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    // Reads are warm...
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    // ...but every write still wants the passphrase typed.
+    machine
+        .cmd_cached(60)
+        .args(["insert", "-e", "bank"])
+        .write_stdin("s3cret\n")
+        .assert()
+        .failure();
+    machine
+        .cmd_cached(60)
+        .args(["rm", "-f", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+    assert!(machine.dir.path().join("store/gmail.np").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn lock_forgets_the_cached_passphrase() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    machine.cmd().arg("lock").assert().success();
+
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+}
+
+#[cfg(unix)]
+#[test]
+fn the_cache_expires() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+    machine
+        .cmd_cached(1)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+}
+
+#[cfg(unix)]
+#[test]
+fn changing_the_passphrase_leaves_the_old_cache_behind() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    machine
+        .cmd_cached(60)
+        .args(["passkey", "enroll"])
+        .write_stdin("master\nnew-pass\nnew-pass\n")
+        .assert()
+        .success();
+
+    // The cache belongs to the identity as it was, so the relocked one is
+    // not readable without typing the new passphrase.
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("new-pass\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn agent_status_says_whether_anything_is_cached() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+
+    machine
+        .cmd()
+        .args(["agent", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing is cached"));
+
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    machine
+        .cmd()
+        .args(["agent", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("expires in"));
+
+    machine.cmd().args(["agent", "stop"]).assert().success();
+    machine
+        .cmd()
+        .args(["agent", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing is cached"));
 }
 
 // ---- the help page ----
@@ -1654,6 +1928,8 @@ fn help_lists_every_command_and_links_the_repo() {
         "passkey add-key",
         "passkey remove-key",
         "passkey disable",
+        "lock",
+        "agent status",
         "help",
     ] {
         assert!(
