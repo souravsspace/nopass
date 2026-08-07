@@ -222,11 +222,34 @@ pub fn stop() -> bool {
     ask("STOP").is_some()
 }
 
+/// Overrides which binary is started to serve the cache. Mostly for tests.
+const BIN_ENV: &str = "NOPASS_BIN";
+
+/// The `nopass` binary, or `None` if this machine has nowhere to find one.
+///
+/// The CLI is not the only caller any more — `nopass-host` links this module
+/// too — so `current_exe()` is only trusted when it really is `nopass`.
+/// Otherwise the binary is looked up on `PATH` the way a shell would.
+fn nopass_binary() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(BIN_ENV) {
+        return Some(PathBuf::from(path));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.file_name().is_some_and(|name| name == "nopass") {
+            return Some(exe);
+        }
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("nopass"))
+        .find(|candidate| candidate.is_file())
+}
+
 /// Start an agent in the background. It gets its own session so that a
 /// Ctrl-C in the terminal that happened to start it does not take the cache
 /// down with it.
 fn spawn() {
-    let Ok(exe) = std::env::current_exe() else {
+    let Some(exe) = nopass_binary() else {
         return;
     };
     let mut cmd = Command::new(exe);
