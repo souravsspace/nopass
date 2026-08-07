@@ -62,18 +62,24 @@ fn browsers(selector: &str) -> Result<Vec<Browser>> {
     if selector == "all" {
         return Ok(Browser::ALL.to_vec());
     }
-    let browser = Browser::parse(selector)
-        .with_context(|| format!("unknown browser `{selector}`"))?;
+    let browser =
+        Browser::parse(selector).with_context(|| format!("unknown browser `{selector}`"))?;
     Ok(vec![browser])
 }
 
 fn home() -> Result<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .context("HOME is not set")
 }
 
 fn run_command(command: Cmd) -> Result<()> {
     match command {
-        Cmd::Install { browser, extension_id, host_path } => {
+        Cmd::Install {
+            browser,
+            extension_id,
+            host_path,
+        } => {
             let binary = match host_path {
                 Some(path) => path,
                 None => std::env::current_exe().context("could not locate this binary")?,
