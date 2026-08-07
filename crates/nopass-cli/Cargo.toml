@@ -27,13 +27,6 @@ default = []
 # works without it.
 security-key = ["dep:ctap-hid-fido2"]
 
-# Touch ID (Secure Enclave) unlock slot. Always compiled on macOS; whether
-# it works at runtime depends on the binary being code-signed with keychain
-# entitlements — see packaging/macos.
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { version = "3", features = ["OSX_10_15"] }
-security-framework-sys = "2"
-
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
