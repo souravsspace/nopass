@@ -12,7 +12,7 @@
 //! Two backends implement [`SecurityKey`]:
 //!
 //! * `hid` — real USB/NFC authenticators, behind the `security-key` feature
-//!   (it pulls in a C HID stack, so it is opt-in exactly like `touchid`).
+//!   (it pulls in a C HID stack, so it is opt-in).
 //! * `mock` — a file-backed software authenticator, active only when
 //!   `NOPASS_FIDO2_MOCK` names a state file. It exists so the enroll/unlock
 //!   flows are testable without hardware, mirroring the existing
