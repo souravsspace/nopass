@@ -1096,6 +1096,7 @@ dependencies = [
  "clap",
  "ctap-hid-fido2",
  "hmac",
+ "libc",
  "nopass-core",
  "predicates",
  "rand 0.9.4",
