@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+// Hands over to the binary that install.js downloaded. stdio is inherited so
+// the passphrase prompt still gets a real terminal.
+"use strict";
+
+const path = require("node:path");
+const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
+
+const binary = path.join(__dirname, "..", "binary", "nopass");
+
+if (!fs.existsSync(binary)) {
+  console.error(
+    "nopass: the binary is missing — the postinstall step did not finish.\n" +
+      "Reinstall with `npm install -g nopass-cli`, or install another way:\n" +
+      "  cargo install nopass-cli",
+  );
+  process.exit(1);
+}
+
+const { status, signal, error } = spawnSync(binary, process.argv.slice(2), {
+  stdio: "inherit",
+});
+
+if (error) {
+  console.error(`nopass: ${error.message}`);
+  process.exit(1);
+}
+// Report a signal death the way a shell does.
+process.exit(signal ? 128 + (require("node:os").constants.signals[signal] || 0) : status);
