@@ -4,7 +4,7 @@
 # hosts the repository for you — see ../README.md. Fedora proper wants the
 # dependency-bundling review, which this spec declares honestly below.
 Name:           nopass
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Fast, self-contained password manager
 
