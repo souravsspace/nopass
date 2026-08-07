@@ -22,7 +22,10 @@ fn cases(side: &str) -> Vec<(String, bool, Value)> {
         .iter()
         .map(|case| {
             (
-                case["name"].as_str().expect("a case has a name").to_string(),
+                case["name"]
+                    .as_str()
+                    .expect("a case has a name")
+                    .to_string(),
                 case["valid"].as_bool().expect("a case has a verdict"),
                 case["json"].clone(),
             )
@@ -32,15 +35,24 @@ fn cases(side: &str) -> Vec<(String, bool, Value)> {
 
 #[test]
 fn the_fixture_file_agrees_with_the_version_we_announce() {
-    assert_eq!(fixtures()["protocolVersion"].as_u64(), Some(PROTOCOL_VERSION as u64));
+    assert_eq!(
+        fixtures()["protocolVersion"].as_u64(),
+        Some(PROTOCOL_VERSION as u64)
+    );
 }
 
 #[test]
 fn every_side_covers_both_verdicts() {
     for side in ["requests", "responses"] {
         let cases = cases(side);
-        assert!(cases.iter().any(|(_, valid, _)| *valid), "{side} has no accepted case");
-        assert!(cases.iter().any(|(_, valid, _)| !*valid), "{side} has no rejected case");
+        assert!(
+            cases.iter().any(|(_, valid, _)| *valid),
+            "{side} has no accepted case"
+        );
+        assert!(
+            cases.iter().any(|(_, valid, _)| !*valid),
+            "{side} has no rejected case"
+        );
     }
 }
 
@@ -72,7 +84,9 @@ fn responses_match_the_fixtures() {
 
 #[test]
 fn no_mutating_verb_can_be_expressed_on_this_wire() {
-    for verb in ["insert", "edit", "rm", "mv", "cp", "delete", "remove", "init"] {
+    for verb in [
+        "insert", "edit", "rm", "mv", "cp", "delete", "remove", "init",
+    ] {
         let json = serde_json::json!({ "id": 1, "verb": verb, "entry": "web/example.com" });
         assert!(
             proto::parse_request(&json).is_err(),
