@@ -8,6 +8,7 @@ use nopass_core::lock::{
     encrypt_slot, encrypt_slot_with_key, is_valid_label, Fido2Slot, LockedIdentity, SecretString,
 };
 use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, Unlocker};
+use zeroize::Zeroize;
 
 mod agent;
 mod auth;
@@ -18,7 +19,16 @@ mod setup;
 /// (passkey/passphrase) identities prompt for authentication on use.
 fn build_crypto(policy: auth::AuthPolicy) -> Box<dyn Crypto> {
     match std::env::var("NOPASS_BACKEND").as_deref() {
-        Ok("plain") => Box::new(nopass_core::PlainCrypto),
+        Ok("plain") => {
+            // The test backend: it stores entries in the clear and has no
+            // identity, so nothing it is asked to authenticate means
+            // anything. Say so, the way the mock authenticator does.
+            eprintln!(
+                "warning: NOPASS_BACKEND=plain — entries are NOT encrypted \
+                 and writing one authenticates nobody."
+            );
+            Box::new(nopass_core::PlainCrypto)
+        }
         Ok("gpg") => Box::new(nopass_core::GpgCrypto::new()),
         _ => Box::new(
             NativeCrypto::new().with_unlocker(Box::new(auth::CachingUnlocker::new(policy))),
@@ -726,6 +736,10 @@ fn cmd_passkey_remove_key(identity_file: &std::path::Path, label: &str) -> Resul
     if locked.fido2_slot(label).is_none() {
         bail!("Error: no security key named {label:?} is enrolled.");
     }
+    // Dropping a slot is a change to the lock, and for someone who enrolled
+    // a key because they cannot recall a passphrase it is the difference
+    // between having their store and not.
+    auth::CliUnlocker.unlock(&locked)?;
     locked.fido2_slots.retain(|s| s.label != label);
     if locked.slot_count() == 0 {
         bail!(
@@ -816,14 +830,16 @@ fn write_identity_file(path: &std::path::Path, contents: &str) -> Result<()> {
 
 /// Recipients for init: explicit args win; otherwise use (creating if
 /// needed) this machine's own keypair.
+/// Returns the recipients and whether a keypair was created on the spot —
+/// a key made seconds ago has already been authenticated for.
 fn init_recipients(
     recipients: Vec<String>,
     identity: Option<&str>,
     no_passphrase: bool,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, bool)> {
     let recipients: Vec<String> = recipients.into_iter().filter(|r| !r.is_empty()).collect();
     if !recipients.is_empty() {
-        return Ok(recipients);
+        return Ok((recipients, false));
     }
     if std::env::var("NOPASS_BACKEND").as_deref() == Ok("gpg") {
         bail!("Usage: nopass init <gpg-key-id>... (the gpg backend cannot generate keys for you)");
@@ -832,11 +848,11 @@ fn init_recipients(
     // An existing key is reused as-is — its public half is readable whether
     // or not the secret is locked.
     if let Some(public) = crypto::identity_recipient(&identity_file) {
-        return Ok(vec![public]);
+        return Ok((vec![public], false));
     }
     let (_, public) = setup::create_identity(identity, no_passphrase)?;
     println!();
-    Ok(vec![public])
+    Ok((vec![public], true))
 }
 
 fn cmd_init(
@@ -846,7 +862,14 @@ fn cmd_init(
     identity: Option<&str>,
     no_passphrase: bool,
 ) -> Result<()> {
-    let recipients = init_recipients(recipients, identity, no_passphrase)?;
+    let (recipients, just_created) = init_recipients(recipients, identity, no_passphrase)?;
+    // Choosing who the store encrypts to is the most damaging write there
+    // is: everything saved afterwards goes to those keys. Asking before the
+    // recipients file is touched is what stops a failed init from leaving
+    // someone else's key behind.
+    if !just_created {
+        store.authenticate()?;
+    }
     store.init(&recipients, path)?;
     println!("Store initialized for {}", recipients.join(", "));
     Ok(())
@@ -862,7 +885,9 @@ fn show_or_list(store: &Store, name: &str, clip: Option<usize>) -> Result<()> {
                 let text = String::from_utf8_lossy(&contents);
                 let line = text
                     .lines()
-                    .nth(line_no.saturating_sub(1))
+                    .nth(line_no.checked_sub(1).with_context(|| {
+                        "There is no line 0; lines are counted from 1.".to_string()
+                    })?)
                     .filter(|l| !l.is_empty())
                     .with_context(|| {
                         format!("There is no password to put on the clipboard at line {line_no}.")
@@ -957,11 +982,13 @@ fn cmd_edit(store: &Store, name: &str) -> Result<()> {
     store.authenticate()?;
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
     let existing = store.entry_exists(name);
-    let tmp = tempdir_secure()?;
-    let tmp_file = tmp.join(format!("{}.txt", name.replace('/', "-")));
-    if existing {
-        std::fs::write(&tmp_file, store.show(name)?)?;
-    }
+    let scratch = ScratchDir::new()?;
+    let file_name = format!("{}.txt", name.replace('/', "-"));
+    let tmp_file = if existing {
+        scratch.write(&file_name, &store.show(name)?)?
+    } else {
+        scratch.path(&file_name)
+    };
 
     let status = Command::new("sh")
         .arg("-c")
@@ -976,9 +1003,9 @@ fn cmd_edit(store: &Store, name: &str) -> Result<()> {
     if !tmp_file.exists() {
         bail!("New password not saved.");
     }
+    // `scratch` takes the plaintext with it when this function returns, so
+    // read it out before then.
     let new = std::fs::read(&tmp_file)?;
-    std::fs::remove_file(&tmp_file).ok();
-    std::fs::remove_dir_all(&tmp).ok();
     if existing && store.show(name)? == new {
         bail!("Password unchanged.");
     }
@@ -1028,6 +1055,9 @@ fn cmd_rm(store: &Store, name: &str, recursive: bool, force: bool) -> Result<()>
 }
 
 fn cmd_copy_move(store: &Store, old: &str, new: &str, is_move: bool, force: bool) -> Result<()> {
+    // The rename happens before the re-encryption that would have prompted,
+    // so without this an unauthenticated mv still moved the entry.
+    store.authenticate()?;
     if !force
         && store.entry_exists(new)
         && std::io::stdin().is_terminal()
@@ -1109,19 +1139,62 @@ fn prompt_hidden(prompt: &str) -> Result<String> {
     if res? == 0 {
         bail!("Error: no passphrase given (stdin is empty).");
     }
-    Ok(line.trim_end_matches('\n').to_string())
+    let answer = line.trim_end_matches('\n').to_string();
+    // The buffer held the passphrase too; wipe it rather than leaving a
+    // second copy in freed memory.
+    line.zeroize();
+    Ok(answer)
 }
 
-fn tempdir_secure() -> Result<PathBuf> {
-    // Prefer /dev/shm (ramdisk) when present; fall back to $TMPDIR.
-    let base = if std::path::Path::new("/dev/shm").is_dir() {
-        PathBuf::from("/dev/shm")
-    } else {
-        std::env::temp_dir()
-    };
-    let dir = base.join(format!("nopass.{}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir)
+/// Somewhere to put a decrypted entry while an editor has it. Private to
+/// its owner, and removed however the command ends — including the ways
+/// that end badly.
+struct ScratchDir(PathBuf);
+
+impl ScratchDir {
+    /// Prefer /dev/shm (a ramdisk) when present; fall back to `$TMPDIR`.
+    /// The directory is *created*, never adopted: `/dev/shm` is writable by
+    /// everyone, and a directory someone else planted there is no place to
+    /// leave a password.
+    fn new() -> Result<Self> {
+        use std::os::unix::fs::DirBuilderExt;
+
+        let base = if std::path::Path::new("/dev/shm").is_dir() {
+            PathBuf::from("/dev/shm")
+        } else {
+            std::env::temp_dir()
+        };
+        let dir = base.join(format!("nopass.{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .with_context(|| format!("could not create a private {}", dir.display()))?;
+        Ok(Self(dir))
+    }
+
+    fn path(&self, name: &str) -> PathBuf {
+        self.0.join(name)
+    }
+
+    /// Write plaintext into the directory, readable by nobody else.
+    fn write(&self, name: &str, contents: &[u8]) -> Result<PathBuf> {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let path = self.path(name);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?
+            .write_all(contents)?;
+        Ok(path)
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
 }
 
 fn copy_to_clipboard(text: &str, name: &str) -> Result<()> {
