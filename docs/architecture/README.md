@@ -156,4 +156,14 @@ Tests are written before the code they cover, at four levels:
 | Contract | vitest + `cargo test` over shared fixtures | the wire protocol, both sides |
 | Unit (Rust) | `cargo test` | host framing, verb dispatch, mutation rejection, origin matching |
 | Unit (TS) | vitest + `wxt/testing/fake-browser` | session state machine, form detection, messaging |
-| End to end | Playwright, persistent context, unpacked extension | unlock → search → fill → lock, against a **stub host** so CI needs no store |
+| End to end | Playwright against `tools/workbench` | unlock → search → fill → lock, driving the real `Popup` and the real dropdown renderer over a mock bridge |
+
+The native messaging hop itself is **not** in the e2e suite. Chrome and Firefox
+read host manifests from fixed per-user OS paths rather than from a browser
+profile, so exercising a real `connectNative` in CI would mean writing into the
+developer's own configuration directory. What that hop carries is covered
+instead from both ends: `crates/nopass-host`'s integration tests drive real
+frames through real dispatch, and the shared fixtures pin the contract the
+extension's `NativeClient` is validated against. What is untested is the glue
+between them — the `connectNative` call itself — which is four lines and fails
+loudly and visibly when it is wrong.
