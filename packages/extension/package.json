@@ -1,0 +1,35 @@
+{
+  "name": "@nopass/extension",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./lib/*": "./lib/*.ts",
+    "./components/*": "./components/*.tsx",
+    "./entrypoints/*": "./entrypoints/*"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nopass/protocol": "workspace:*",
+    "@nopass/ui": "workspace:*",
+    "lucide-react": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.4",
+    "happy-dom": "20.0.11",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  }
+}
