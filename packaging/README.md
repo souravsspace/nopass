@@ -50,7 +50,6 @@ an account or a merge request somewhere.
 |---|---|---|---|
 | **nixpkgs** (upstream) | [`nix/nopass-release.nix`](nix/nopass-release.nix) | `nix-env -iA nixpkgs.nopass` | a PR to NixOS/nixpkgs, and a `cargoHash` bump per release |
 | **AUR** (Arch) | [`aur/PKGBUILD`](aur/PKGBUILD), [`aur/.SRCINFO`](aur/.SRCINFO) | `yay -S nopass` | an AUR account with an SSH key; push to `aur@aur.archlinux.org:nopass.git` |
-| **Alpine** | [`alpine/APKBUILD`](alpine/APKBUILD) | `apk add nopass` | a merge request to alpine/aports (testing/), then a maintainer promotes it |
 | **Fedora / RHEL** | [`rpm/nopass.spec`](rpm/nopass.spec) | `dnf copr enable souravsspace/nopass && dnf install nopass` | a Fedora account; COPR builds and hosts it for free |
 
 ## Worth considering, nothing written
