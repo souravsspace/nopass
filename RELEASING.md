@@ -90,7 +90,6 @@ each one the same way — the checksums differ per channel:
 | File | What to change |
 |---|---|
 | `packaging/aur/PKGBUILD`, `aur/.SRCINFO` | `pkgver`, tarball `sha256sums`; the `.SRCINFO` is generated with `makepkg --printsrcinfo` |
-| `packaging/rpm/nopass.spec` | `Version:` |
 | `packaging/nix/nopass-release.nix` | `version`, `src.hash`, `cargoHash` |
 
 The two nix hashes are **not** the tarball checksum — `fetchFromGitHub`
@@ -106,7 +105,7 @@ nix build --impure --expr '(builtins.getFlake "git+file://'$PWD'?dirty=1").input
 working tree and needs no hashes, so it follows the default branch on its
 own.
 
-Publishing to the AUR, COPR and nixpkgs each needs an account
+Publishing to the AUR and nixpkgs each needs an account
 somewhere; the per-channel instructions are in
 [packaging/README.md](packaging/README.md).
 
@@ -134,4 +133,4 @@ only reports whether an update exists.
 - [ ] `cargo publish` — core, then cli
 - [ ] tap formula url + sha256 updated
 - [ ] `brew install --build-from-source souravsspace/tap/nopass` works
-- [ ] `packaging/` version bumps committed (aur, rpm, nix)
+- [ ] `packaging/` version bumps committed (aur, nix)
