@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nopass-core", "crates/nopass-cli"]
+members = ["crates/nopass-core", "crates/nopass-cli", "crates/nopass-host"]
 
 [workspace.package]
 version = "0.2.1"
@@ -20,6 +20,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 rand = "0.9"
 walkdir = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 zeroize = "1"
 tempfile = "3"
 assert_cmd = "2"
