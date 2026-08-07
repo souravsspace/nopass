@@ -1,11 +1,13 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 use age::secrecy::ExposeSecret;
 
+use crate::config;
 use crate::error::{Error, Result};
-use crate::lock::{LockedIdentity, Unlocker};
+use crate::lock::{encrypt_slot, LockedIdentity, SecretString, Unlocker};
 
 /// Pluggable encryption backend. The default is [`NativeCrypto`], which
 /// needs nothing but the nopass binary itself; [`GpgCrypto`] is available
@@ -21,20 +23,24 @@ pub trait Crypto: Send + Sync {
 pub struct NativeCrypto {
     identity_file: PathBuf,
     unlocker: Option<Box<dyn Unlocker>>,
+    /// The secret recovered by the last successful unlock, kept for the life
+    /// of this process only. A single command can decrypt many entries —
+    /// `grep` reads the whole store, `init` re-encrypts it — and asking for
+    /// the passphrase once per file would be unusable. Nothing is written
+    /// anywhere, so the next command asks again.
+    unlocked: Mutex<Option<String>>,
 }
 
 impl NativeCrypto {
     pub fn new() -> Self {
-        Self {
-            identity_file: default_identity_file(),
-            unlocker: None,
-        }
+        Self::with_identity_file(default_identity_file())
     }
 
     pub fn with_identity_file(identity_file: PathBuf) -> Self {
         Self {
             identity_file,
             unlocker: None,
+            unlocked: Mutex::new(None),
         }
     }
 
@@ -61,11 +67,14 @@ impl NativeCrypto {
         // A locked identity must be unlocked (Touch ID / passphrase) before
         // its secret key is usable.
         if LockedIdentity::is_locked_file(&contents) {
-            let locked = LockedIdentity::parse(&contents)
-                .map_err(|_| Error::MalformedLock(self.identity_file.clone()))?;
-            let unlocker = self.unlocker.as_ref().ok_or(Error::Locked)?;
-            let secret = unlocker.unlock(&locked)?;
-            let ids = Self::parse_identities(&secret);
+            let mut cached = self.unlocked.lock().expect("unlock cache is not poisoned");
+            if cached.is_none() {
+                let locked = LockedIdentity::parse(&contents)
+                    .map_err(|_| Error::MalformedLock(self.identity_file.clone()))?;
+                let unlocker = self.unlocker.as_ref().ok_or(Error::Locked)?;
+                *cached = Some(unlocker.unlock(&locked)?);
+            }
+            let ids = Self::parse_identities(cached.as_deref().expect("just unlocked"));
             if ids.is_empty() {
                 return Err(Error::AuthFailed(
                     "unlocked data did not contain a valid identity".into(),
@@ -88,12 +97,32 @@ impl Default for NativeCrypto {
     }
 }
 
-/// Identity location: NOPASS_IDENTITY or ~/.config/nopass/identity.txt.
+/// Identity location, in order of precedence: the `NOPASS_IDENTITY`
+/// environment variable, the path recorded by first-run setup in the config
+/// file, then `~/.config/nopass/identity.txt`.
 pub fn default_identity_file() -> PathBuf {
     if let Some(path) = std::env::var_os("NOPASS_IDENTITY") {
         return PathBuf::from(path);
     }
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/nopass/identity.txt")
+    if let Some(path) = config::read_identity_path(&config::default_config_file()) {
+        return path;
+    }
+    config::default_identity_location()
+}
+
+/// Write `contents` to `path` with 0600 permissions, creating parent dirs.
+/// Every file holding key material goes through here.
+pub fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 /// Generate a fresh keypair, write the secret identity to `path` (0600),
@@ -101,20 +130,37 @@ pub fn default_identity_file() -> PathBuf {
 pub fn generate_identity(path: &Path) -> Result<String> {
     let identity = age::x25519::Identity::generate();
     let public = identity.to_public().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let contents = format!(
-        "# nopass identity file — keep this secret\n# public key: {public}\n{}\n",
-        identity.to_string().expose_secret()
-    );
-    std::fs::write(path, contents)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    write_secret_file(
+        path,
+        &identity_file_contents(&public, &identity_secret(&identity)),
+    )?;
     Ok(public)
+}
+
+/// Generate a fresh keypair and write it to `path` already locked behind
+/// `passphrase`, so the secret key never exists on disk in the clear.
+/// Returns the public recipient string.
+pub fn generate_identity_locked(path: &Path, passphrase: &SecretString) -> Result<String> {
+    let identity = age::x25519::Identity::generate();
+    let public = identity.to_public().to_string();
+    let locked = LockedIdentity {
+        public: Some(public.clone()),
+        passphrase_slot: Some(encrypt_slot(&identity_secret(&identity), passphrase)?),
+        ..Default::default()
+    };
+    write_secret_file(path, &locked.serialize())?;
+    Ok(public)
+}
+
+fn identity_secret(identity: &age::x25519::Identity) -> String {
+    identity.to_string().expose_secret().to_string()
+}
+
+fn identity_file_contents(public: &str, secret: &str) -> String {
+    format!(
+        "# nopass identity file — keep this secret\n# public key: {public}\n{}\n",
+        secret.trim()
+    )
 }
 
 /// Read the plaintext `AGE-SECRET-KEY-...` string from an *unlocked*
@@ -149,25 +195,18 @@ pub fn public_from_secret(secret: &str) -> Option<String> {
 pub fn write_plaintext_identity(path: &Path, secret: &str) -> Result<String> {
     let public = public_from_secret(secret)
         .ok_or_else(|| Error::AuthFailed("not a valid age secret key".into()))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let contents = format!(
-        "# nopass identity file — keep this secret\n# public key: {public}\n{}\n",
-        secret.trim()
-    );
-    std::fs::write(path, contents)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    write_secret_file(path, &identity_file_contents(&public, secret))?;
     Ok(public)
 }
 
 /// Read the public recipient corresponding to the identity file, if present.
+/// Works for locked identities too: encrypting to yourself never requires
+/// unlocking anything.
 pub fn identity_recipient(path: &Path) -> Option<String> {
     let contents = std::fs::read_to_string(path).ok()?;
+    if LockedIdentity::is_locked_file(&contents) {
+        return LockedIdentity::parse(&contents).ok()?.public;
+    }
     contents
         .lines()
         .map(str::trim)
@@ -443,6 +482,110 @@ mod tests {
         let unlocked =
             NativeCrypto::with_identity_file(id_file).with_unlocker(Box::new(PwUnlocker));
         assert_eq!(unlocked.decrypt(&file).unwrap(), b"hi\n");
+    }
+
+    #[test]
+    fn generated_locked_identity_never_touches_disk_in_the_clear() {
+        use crate::lock::decrypt_slot;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let id_file = tmp.path().join("identity.txt");
+        let passphrase = SecretString::from("master".to_owned());
+        let public = generate_identity_locked(&id_file, &passphrase).unwrap();
+
+        assert!(public.starts_with("age1"), "{public}");
+        let on_disk = std::fs::read_to_string(&id_file).unwrap();
+        assert!(LockedIdentity::is_locked_file(&on_disk), "{on_disk}");
+        assert!(!on_disk.contains("AGE-SECRET-KEY"), "{on_disk}");
+        assert!(matches!(read_identity_secret(&id_file), Err(Error::Locked)));
+
+        // The passphrase recovers exactly the key the public half names.
+        let locked = LockedIdentity::parse(&on_disk).unwrap();
+        let secret = decrypt_slot(locked.passphrase_slot.as_ref().unwrap(), &passphrase).unwrap();
+        assert_eq!(public_from_secret(&secret).unwrap(), public);
+        assert!(decrypt_slot(
+            locked.passphrase_slot.as_ref().unwrap(),
+            &SecretString::from("wrong".to_owned())
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn identity_files_are_private_to_their_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let plain = tmp.path().join("plain.txt");
+        generate_identity(&plain).unwrap();
+        let secret = read_identity_secret(&plain).unwrap();
+
+        let locked = tmp.path().join("sub/locked.txt");
+        generate_identity_locked(&locked, &SecretString::from("pw".to_owned())).unwrap();
+
+        let restored = tmp.path().join("restored.txt");
+        write_plaintext_identity(&restored, &secret).unwrap();
+
+        for path in [plain, locked, restored] {
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "{} should be 0600, was {mode:o}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn one_command_unlocks_the_identity_only_once() {
+        use crate::lock::decrypt_slot;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let id_file = tmp.path().join("identity.txt");
+        let public =
+            generate_identity_locked(&id_file, &SecretString::from("pw".to_owned())).unwrap();
+
+        // Three entries, as `grep` or a re-encrypt would walk.
+        let files: Vec<PathBuf> = (0..3).map(|i| tmp.path().join(format!("{i}.np"))).collect();
+        let writer = NativeCrypto::with_identity_file(id_file.clone());
+        for file in &files {
+            writer
+                .encrypt(b"secret\n", std::slice::from_ref(&public), file)
+                .unwrap();
+        }
+
+        struct CountingUnlocker(Arc<AtomicUsize>);
+        impl Unlocker for CountingUnlocker {
+            fn unlock(&self, locked: &LockedIdentity) -> Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                decrypt_slot(
+                    locked.passphrase_slot.as_ref().unwrap(),
+                    &SecretString::from("pw".to_owned()),
+                )
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let crypto = NativeCrypto::with_identity_file(id_file.clone())
+            .with_unlocker(Box::new(CountingUnlocker(calls.clone())));
+        for file in &files {
+            assert_eq!(crypto.decrypt(file).unwrap(), b"secret\n");
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "decrypting many entries must prompt for authentication only once"
+        );
+
+        // Nothing is cached beyond this backend, so the next command (a new
+        // process, a new NativeCrypto) authenticates again.
+        let fresh = NativeCrypto::with_identity_file(id_file)
+            .with_unlocker(Box::new(CountingUnlocker(calls.clone())));
+        fresh.decrypt(&files[0]).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]
