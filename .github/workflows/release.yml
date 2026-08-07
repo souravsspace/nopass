@@ -19,8 +19,29 @@ permissions:
   contents: write
 
 jobs:
+  # A tag can point at any commit in the repository. Releasing one that never
+  # reached main would ship code nobody reviewed, so refuse it.
+  guard:
+    name: tag is on main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag is an ancestor of main
+        run: |
+          git fetch --no-tags origin main
+          sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main — refusing to release"
+            exit 1
+          fi
+
   binaries:
     name: ${{ matrix.target }}
+    needs: guard
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -73,6 +94,7 @@ jobs:
 
   debs:
     name: deb (${{ matrix.arch }})
+    needs: guard
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
