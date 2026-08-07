@@ -115,4 +115,7 @@ jobs:
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
           (cd dist && shasum -a 256 *.tar.gz *.deb > checksums.txt)
+          # A tag push arrives before the release exists.
+          gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1 ||
+            gh release create "$tag" --title "$tag" --generate-notes --repo "${{ github.repository }}"
           gh release upload "$tag" dist/* --clobber --repo "${{ github.repository }}"
