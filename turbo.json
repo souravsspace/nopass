@@ -1,0 +1,41 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".output/**"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "e2e": {
+      "dependsOn": ["build", "//#build:rust"],
+      "outputs": ["playwright-report/**", "test-results/**"]
+    },
+    "lint": {},
+    "check-types": {
+      "dependsOn": ["^build"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "//#build:rust": {
+      "inputs": ["crates/**", "Cargo.toml", "Cargo.lock"],
+      "outputs": ["target/release/nopass", "target/release/nopass-host"]
+    },
+    "//#test:rust": {
+      "inputs": [
+        "crates/**",
+        "packages/protocol/fixtures/**",
+        "Cargo.toml",
+        "Cargo.lock"
+      ]
+    },
+    "//#lint:rust": {
+      "inputs": ["crates/**", "Cargo.toml", "Cargo.lock"]
+    }
+  }
+}
