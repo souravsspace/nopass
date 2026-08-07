@@ -2,6 +2,10 @@
 
 How to ship a new version, end to end.
 
+Homebrew is the packaging channel that is live today. Every other one —
+what it costs, what it needs, and what is already written — is in
+[packaging/README.md](packaging/README.md).
+
 ## 1. Cut the release
 
 ```sh
