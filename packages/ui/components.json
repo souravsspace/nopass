@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@nopass/ui/components",
+    "ui": "@nopass/ui/components",
+    "hooks": "@nopass/ui/hooks",
+    "lib": "@nopass/ui/lib",
+    "utils": "@nopass/ui/lib/utils"
+  }
+}
