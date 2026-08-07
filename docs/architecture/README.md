@@ -100,10 +100,29 @@ protocol layer. That rejection is a test.
 
 ## Origin matching
 
-An entry is offered for a page when its name or its `url:` field matches the
-page's origin under [eTLD+1](https://publicsuffix.org/) rules — `mail.google.com`
-matches an entry for `google.com`, `google.com.evil.tld` does not. Matching runs
-in the host, not the extension, so a compromised content script cannot widen it.
+An entry is offered on its own host and on hosts beneath it, and nowhere else.
+The rule is a label-boundary suffix check, not a public-suffix lookup: no list
+is compiled in, and an entry whose host is a single label is never offered at
+all, so `com` cannot match every `.com`.
+
+| Entry host | Page host | Offered |
+|------------|-----------|---------|
+| `google.com` | `google.com` | yes |
+| `google.com` | `mail.google.com` | yes |
+| `google.com` | `google.com.evil.tld` | no |
+| `google.com` | `notgoogle.com` | no |
+| `mail.google.com` | `google.com` | no |
+| `com` | anything | no |
+
+The entry's host comes from its `url:` line if it has one, otherwise from the
+last path segment of its name — the `web/google.com` convention. Matching runs
+in the host, not the extension, so a compromised content script cannot widen
+it. Non-`http(s)` origins — `file:`, `chrome:`, extension pages, opaque `null`
+— produce no host and therefore no matches.
+
+`search` filters on names before decrypting anything, so an entry that is only
+discoverable through its `url:` line will not be found by origin. Name your
+entries after their host, or search by name in the popup.
 
 ## Repository layout
 
