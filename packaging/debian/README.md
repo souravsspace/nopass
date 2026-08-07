@@ -6,7 +6,7 @@ in step with the crate by hand:
 
 ```sh
 cargo install cargo-deb
-packaging/debian/build-deb.sh          # → target/debian/nopass_0.2.0_arm64.deb
+packaging/debian/build-deb.sh          # → target/debian/nopass_0.2.1_arm64.deb
 sudo apt install ./target/debian/nopass_*.deb
 ```
 
