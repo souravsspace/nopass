@@ -1751,3 +1751,90 @@ fn the_short_help_points_at_the_long_one() {
             )),
         );
 }
+
+// ---- Touch ID slot ----
+
+#[cfg(target_os = "macos")]
+#[test]
+fn touch_id_is_attempted_on_macos_and_explains_itself_when_it_cannot_work() {
+    // Test binaries are never code-signed, so this exercises exactly what a
+    // `cargo install` user sees: the slot is skipped, the reason names code
+    // signing rather than an OSStatus, and locking still succeeds.
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .args(["init", "--no-passphrase"])
+        .assert()
+        .success();
+
+    let out = machine
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("master\nmaster\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("passphrase"));
+
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    if stderr.contains("Skipping Touch ID") {
+        assert!(
+            stderr.contains("not code-signed"),
+            "the skip reason should be actionable, got:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("-34018"),
+            "raw OSStatus leaked to the user:\n{stderr}"
+        );
+    }
+
+    // The identity is locked and usable either way.
+    machine.insert("gmail", "hunter2");
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn no_touchid_skips_the_slot_without_comment() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .args(["init", "--no-passphrase"])
+        .assert()
+        .success();
+    machine
+        .cmd()
+        .args(["passkey", "enroll", "--no-touchid"])
+        .write_stdin("master\nmaster\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Touch ID").not());
+}
+
+#[test]
+fn the_macos_signing_script_refuses_to_run_unconfigured() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/macos/sign.sh")
+        .canonicalize()
+        .expect("packaging/macos/sign.sh should exist");
+
+    let out = std::process::Command::new("bash")
+        .arg(&script)
+        .env_remove("TEAM_ID")
+        .env_remove("BUNDLE_ID")
+        .env_remove("SIGN_IDENTITY")
+        .env_remove("PROFILE")
+        .output()
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "it must not sign with no configuration"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("TEAM_ID"), "{stderr}");
+}
