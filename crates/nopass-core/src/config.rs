@@ -15,8 +15,11 @@ use crate::error::Result;
 /// Overrides the location of the config file itself.
 pub const CONFIG_ENV: &str = "NOPASS_CONFIG";
 
-/// The only key we currently store.
+/// Where the private key lives.
 const IDENTITY_KEY: &str = "identity";
+
+/// How long an unlocked identity may be cached by the agent.
+const CACHE_TTL_KEY: &str = "cache-ttl";
 
 /// The user's home directory, or an empty path if `HOME` is unset.
 pub fn home() -> PathBuf {
@@ -52,19 +55,36 @@ pub fn expand_tilde(input: &str) -> PathBuf {
     }
 }
 
-/// Pull the identity path out of a config file's text.
-pub fn identity_path_in(text: &str) -> Option<PathBuf> {
+/// Pull one `key = value` setting out of a config file's text.
+fn value_in<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.lines()
         .map(|line| line.split('#').next().unwrap_or("").trim())
         .filter_map(|line| line.split_once('='))
-        .find(|(key, _)| key.trim() == IDENTITY_KEY)
-        .map(|(_, value)| expand_tilde(value))
+        .find(|(k, _)| k.trim() == key)
+        .map(|(_, value)| value)
+}
+
+/// Pull the identity path out of a config file's text.
+pub fn identity_path_in(text: &str) -> Option<PathBuf> {
+    value_in(text, IDENTITY_KEY)
+        .map(expand_tilde)
         .filter(|path| !path.as_os_str().is_empty())
 }
 
 /// Read the recorded identity path, if a config file exists and names one.
 pub fn read_identity_path(config_file: &Path) -> Option<PathBuf> {
     identity_path_in(&std::fs::read_to_string(config_file).ok()?)
+}
+
+/// Seconds an unlocked identity may stay cached. Absent — or not a number —
+/// means no caching, which is the default.
+pub fn cache_ttl_in(text: &str) -> Option<u64> {
+    value_in(text, CACHE_TTL_KEY)?.trim().parse().ok()
+}
+
+/// Read the configured cache lifetime, if a config file exists and sets one.
+pub fn read_cache_ttl(config_file: &Path) -> Option<u64> {
+    cache_ttl_in(&std::fs::read_to_string(config_file).ok()?)
 }
 
 /// Record `identity` as the private key location, creating the config file.
@@ -140,6 +160,15 @@ mod tests {
         let moved = tmp.path().join("elsewhere/id.txt");
         set_identity_path(&config, &moved).unwrap();
         assert_eq!(read_identity_path(&config).unwrap(), moved);
+    }
+
+    #[test]
+    fn cache_ttl_is_read_only_when_it_is_a_number() {
+        assert_eq!(cache_ttl_in("cache-ttl = 300\n"), Some(300));
+        assert_eq!(cache_ttl_in("identity = /k\ncache-ttl = 0\n"), Some(0));
+        assert_eq!(cache_ttl_in("cache-ttl = 60 # a minute\n"), Some(60));
+        assert_eq!(cache_ttl_in("identity = /k\n"), None);
+        assert_eq!(cache_ttl_in("cache-ttl = soon\n"), None);
     }
 
     #[test]
