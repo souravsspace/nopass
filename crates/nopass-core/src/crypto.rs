@@ -15,6 +15,14 @@ use crate::lock::{encrypt_slot, LockedIdentity, SecretString, Unlocker};
 pub trait Crypto: Send + Sync {
     fn encrypt(&self, plaintext: &[u8], recipients: &[String], dest: &Path) -> Result<()>;
     fn decrypt(&self, src: &Path) -> Result<Vec<u8>>;
+
+    /// Prove the caller can open this machine's identity, without decrypting
+    /// anything in particular. Reading an entry proves it in passing;
+    /// changing the store has to ask for itself. Backends that keep no
+    /// identity of their own have nothing to check.
+    fn authenticate(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Built-in backend using age (X25519 + ChaCha20-Poly1305), fully in-process.
@@ -255,6 +263,17 @@ impl Crypto for NativeCrypto {
             .read_to_end(&mut plaintext)
             .map_err(|e| Error::Decrypt(e.to_string()))?;
         Ok(plaintext)
+    }
+
+    fn authenticate(&self) -> Result<()> {
+        match self.identities() {
+            Ok(_) => Ok(()),
+            // Nothing on this machine to authenticate against: a plaintext
+            // key is already open, and a machine with no key at all can only
+            // write. Refusing either would protect nothing.
+            Err(Error::NoIdentity(_)) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -585,6 +604,59 @@ mod tests {
             .with_unlocker(Box::new(CountingUnlocker(calls.clone())));
         fresh.decrypt(&files[0]).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn authenticating_opens_a_locked_identity_and_only_asks_once() {
+        use crate::lock::decrypt_slot;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct CountingUnlocker(Arc<AtomicUsize>);
+        impl Unlocker for CountingUnlocker {
+            fn unlock(&self, locked: &LockedIdentity) -> Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                decrypt_slot(
+                    locked.passphrase_slot.as_ref().unwrap(),
+                    &SecretString::from("pw".to_owned()),
+                )
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let id_file = tmp.path().join("identity.txt");
+        generate_identity_locked(&id_file, &SecretString::from("pw".to_owned())).unwrap();
+
+        // Without an unlocker there is no way to prove anything.
+        assert!(matches!(
+            NativeCrypto::with_identity_file(id_file.clone()).authenticate(),
+            Err(Error::Locked)
+        ));
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let crypto = NativeCrypto::with_identity_file(id_file)
+            .with_unlocker(Box::new(CountingUnlocker(calls.clone())));
+        crypto.authenticate().unwrap();
+        crypto.authenticate().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn authenticating_has_nothing_to_check_without_a_locked_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // A plaintext key is its own proof; there is nothing to ask for.
+        let plain = tmp.path().join("identity.txt");
+        generate_identity(&plain).unwrap();
+        NativeCrypto::with_identity_file(plain)
+            .authenticate()
+            .unwrap();
+
+        // No key at all: this machine can only ever write, so refusing here
+        // would stop a write-only store from working.
+        NativeCrypto::with_identity_file(tmp.path().join("nope.txt"))
+            .authenticate()
+            .unwrap();
     }
 
     #[test]
