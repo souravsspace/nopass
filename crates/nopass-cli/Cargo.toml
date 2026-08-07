@@ -19,6 +19,7 @@ hmac.workspace = true
 libc.workspace = true
 rand.workspace = true
 sha2.workspace = true
+zeroize.workspace = true
 ctap-hid-fido2 = { workspace = true, optional = true }
 
 [features]
