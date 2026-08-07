@@ -19,6 +19,28 @@ only — see [Windows](#windows) at the bottom.
 | **cargo (git)** | `cargo install --git https://github.com/souravsspace/nopass nopass-cli` | nothing; the tag is enough |
 | **GitHub release** | download the source tarball | `gh release create` |
 
+## What a tag triggers
+
+Pushing a `v*` tag starts two workflows, and both refuse a tag that is not
+an ancestor of `main`:
+
+- [`release.yml`](../.github/workflows/release.yml) — tests and builds four
+  targets, builds both `.deb`s, and attaches them to the release with a
+  `checksums.txt`.
+- [`publish.yml`](../.github/workflows/publish.yml) — pushes the version out
+  to every channel that can be automated. Each job is skipped when its
+  secret is missing, so the workflow stays green until you add one.
+
+| Job | Repository secret | How to get it |
+|---|---|---|
+| crates.io | `CARGO_REGISTRY_TOKEN` | `cargo login` prints it, or crates.io → Account Settings → API Tokens |
+| homebrew tap | `TAP_TOKEN` | a GitHub PAT with `contents: write` on `souravsspace/homebrew-tap` |
+| aur | `AUR_SSH_KEY` | the private half of the SSH key registered on your AUR account |
+| copr | `COPR_CONFIG` | the whole `~/.config/copr` file from copr.fedorainfracloud.org → API |
+
+The AUR and COPR jobs read `packaging/aur/*` and `packaging/rpm/nopass.spec`
+**at the tag**, so bump those files before tagging.
+
 ## Written, not published yet
 
 Definitions are in this directory and build today. Publishing each one needs
