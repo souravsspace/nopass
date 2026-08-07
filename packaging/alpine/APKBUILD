@@ -4,7 +4,7 @@
 # Alpine package. Lands upstream through a merge request against
 # gitlab.alpinelinux.org/alpine/aports (testing/nopass) — see ../README.md.
 pkgname=nopass
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=0
 pkgdesc="Fast, self-contained password manager"
 url="https://github.com/souravsspace/nopass"
@@ -36,5 +36,5 @@ package() {
 }
 
 sha512sums="
-ee8f54f000ee64f2c1b1d748f856749295d7a81e5b395f5b95e8672e16887179882bc630bda078e12f957bcd209efd0915099f40da3b89b90de876fc0d5a9ecc  nopass-0.2.0.tar.gz
+1f47c4732511359a00b9dfe8c13a761110c3f52208b452940a0588fa4a5d2224f0f6a4bbf58e8d00274550d20dcfccbb4ba76688df0be331dc9f5be00a9c2de1  nopass-0.2.1.tar.gz
 "
