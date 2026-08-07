@@ -1,11 +1,10 @@
 //! Locked identities: the age secret key encrypted at rest behind one or
 //! more authentication "slots". Each slot is an independent age (scrypt)
 //! ciphertext of the *same* identity secret, openable by a different secret
-//! — a user passphrase, a high-entropy secret released by a platform
-//! authenticator (e.g. macOS Touch ID via the Keychain), or the HMAC output
-//! of a FIDO2 security key (a passkey). This mirrors the key-slot model of
-//! disk encryption: unlocking any one slot recovers the identity, and slots
-//! can be added or removed independently.
+//! — a user passphrase, or the HMAC output of a FIDO2 security key (a
+//! passkey). This mirrors the key-slot model of disk encryption: unlocking
+//! any one slot recovers the identity, and slots can be added or removed
+//! independently.
 
 use base64::Engine;
 
@@ -22,7 +21,6 @@ pub const LOCK_HEADER: &str = "# nopass-locked v1";
 const PUBLIC_KEY_COMMENT: &str = "# public key:";
 
 const SLOT_PASSPHRASE: &str = "slot-passphrase:";
-const SLOT_KEYCHAIN: &str = "slot-keychain:";
 const SLOT_FIDO2: &str = "slot-fido2:";
 
 /// scrypt work factor for slots whose secret is *already* a uniform 256-bit
@@ -84,8 +82,6 @@ pub struct LockedIdentity {
     pub public: Option<String>,
     /// age ciphertext of the identity under the user's passphrase.
     pub passphrase_slot: Option<Vec<u8>>,
-    /// age ciphertext of the identity under a Keychain-held secret.
-    pub keychain_slot: Option<Vec<u8>>,
     /// One entry per enrolled security key; any of them can unlock.
     pub fido2_slots: Vec<Fido2Slot>,
 }
@@ -100,10 +96,6 @@ impl LockedIdentity {
         self.passphrase_slot.is_some()
     }
 
-    pub fn has_keychain(&self) -> bool {
-        self.keychain_slot.is_some()
-    }
-
     pub fn has_fido2(&self) -> bool {
         !self.fido2_slots.is_empty()
     }
@@ -111,9 +103,7 @@ impl LockedIdentity {
     /// Total number of usable slots — the caller's guard against writing an
     /// identity nothing can open.
     pub fn slot_count(&self) -> usize {
-        usize::from(self.has_passphrase())
-            + usize::from(self.has_keychain())
-            + self.fido2_slots.len()
+        usize::from(self.has_passphrase()) + self.fido2_slots.len()
     }
 
     pub fn fido2_slot(&self, label: &str) -> Option<&Fido2Slot> {
@@ -137,8 +127,6 @@ impl LockedIdentity {
             }
             if let Some(rest) = line.strip_prefix(SLOT_PASSPHRASE) {
                 locked.passphrase_slot = Some(decode_slot(rest)?);
-            } else if let Some(rest) = line.strip_prefix(SLOT_KEYCHAIN) {
-                locked.keychain_slot = Some(decode_slot(rest)?);
             } else if let Some(rest) = line.strip_prefix(SLOT_FIDO2) {
                 locked.fido2_slots.push(parse_fido2_slot(rest)?);
             }
@@ -161,9 +149,6 @@ impl LockedIdentity {
         }
         if let Some(slot) = &self.passphrase_slot {
             out.push_str(&format!("{SLOT_PASSPHRASE} {}\n", b64().encode(slot)));
-        }
-        if let Some(slot) = &self.keychain_slot {
-            out.push_str(&format!("{SLOT_KEYCHAIN} {}\n", b64().encode(slot)));
         }
         for slot in &self.fido2_slots {
             out.push_str(&format!(
@@ -335,14 +320,12 @@ mod tests {
     fn parse_serialize_roundtrip() {
         let locked = LockedIdentity {
             passphrase_slot: Some(b"abc".to_vec()),
-            keychain_slot: Some(b"xyz".to_vec()),
             ..Default::default()
         };
         let text = locked.serialize();
         assert!(LockedIdentity::is_locked_file(&text));
         let parsed = LockedIdentity::parse(&text).unwrap();
         assert_eq!(parsed.passphrase_slot.as_deref(), Some(&b"abc"[..]));
-        assert_eq!(parsed.keychain_slot.as_deref(), Some(&b"xyz"[..]));
     }
 
     #[test]
@@ -371,12 +354,11 @@ mod tests {
     fn parse_passphrase_only() {
         let locked = LockedIdentity {
             passphrase_slot: Some(b"only".to_vec()),
-            keychain_slot: None,
             ..Default::default()
         };
         let parsed = LockedIdentity::parse(&locked.serialize()).unwrap();
         assert!(parsed.has_passphrase());
-        assert!(!parsed.has_keychain());
+        assert_eq!(parsed.slot_count(), 1);
     }
 
     #[test]
@@ -402,7 +384,6 @@ mod tests {
 
         let locked = LockedIdentity {
             passphrase_slot: Some(encrypt_slot(secret, &pass("master")).unwrap()),
-            keychain_slot: None,
             ..Default::default()
         };
         let text = locked.serialize();
@@ -485,6 +466,21 @@ mod tests {
         let parsed = LockedIdentity::parse(&text).unwrap();
         assert_eq!(parsed.passphrase_slot.as_deref(), Some(&b"legacy"[..]));
         assert!(!parsed.has_fido2());
+    }
+
+    #[test]
+    fn a_touch_id_slot_from_an_older_version_is_ignored_rather_than_fatal() {
+        // nopass used to write "slot-keychain:" for macOS Touch ID. Support
+        // is gone, but an identity file that still carries one must keep
+        // opening with its passphrase.
+        let text = format!(
+            "{LOCK_HEADER}\nslot-keychain: {}\nslot-passphrase: {}\n",
+            b64().encode(b"old-touch-id"),
+            b64().encode(b"pw")
+        );
+        let parsed = LockedIdentity::parse(&text).unwrap();
+        assert!(parsed.has_passphrase());
+        assert_eq!(parsed.slot_count(), 1);
     }
 
     #[test]
