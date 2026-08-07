@@ -255,6 +255,9 @@ nopass passkey add-key [--label name] [--pin]
 nopass passkey remove-key name           drop a security key slot
 nopass passkey disable                   remove the lock (requires auth)
 nopass passkey status                    show lock state and slots
+nopass lock                              forget the cached passphrase now
+nopass agent status                      what is cached, and for how long
+nopass agent stop                        forget it and stop the agent
 ```
 
 Aliases: `ls`=`list`, `rm`=`remove`/`delete`, `mv`=`rename`, `cp`=`copy`.
@@ -367,6 +370,37 @@ the slot cannot be opened without the physical device.
 Slots recorded by a newer nopass are ignored rather than fatal to an older
 one, so a store shared across machines keeps working while you roll out.
 
+## Authentication and the passphrase cache
+
+Every command that touches the store proves the store is yours first:
+
+- **Reading** — `show`, `grep`, `edit` — has to unlock the key to decrypt.
+- **Changing** — `insert`, `generate`, `edit`, `rm`, `mv`, `cp`, `init` —
+  asks too, even though encrypting only needs the public half. Deleting an
+  entry needs no key at all, so this prompt is the only thing between a
+  borrowed terminal and an emptied store.
+
+By default nothing is remembered between commands. If that is too much
+typing, let reads reuse a passphrase for a while:
+
+```sh
+echo "cache-ttl = 300" >> ~/.config/nopass/config   # or NOPASS_CACHE_TTL=300
+```
+
+The first unlock then starts a small agent that keeps the unlocked key **in
+memory only** — never on disk — for that many seconds, listening on a socket
+in a directory only you can reach. What it does and does not cover:
+
+- Reads are served from the cache; **every change still asks**, and typing it
+  again does not extend the entry.
+- The lifetime is absolute, not idle-based, and counted on the wall clock, so
+  a laptop that sleeps through it wakes up with nothing cached.
+- Relocking the identity (`passkey enroll`, `add-key`, `remove-key`) leaves
+  the old entry unusable rather than stale.
+- `nopass lock` forgets it now; `nopass agent status` says what is held.
+- The cache needs a private runtime directory (`$XDG_RUNTIME_DIR`, or the
+  per-session `$TMPDIR` on macOS). Without one, nopass just keeps asking.
+
 ## Configuration
 
 All optional, via environment variables:
@@ -385,6 +419,8 @@ All optional, via environment variables:
 | `NOPASS_CLIP_TIME` | `45` | seconds before clipboard clears |
 | `NOPASS_GPG_OPTS` | — | extra flags for the gpg backend |
 | `NOPASS_UNLOCK` | — | `passphrase` skips enrolled security keys |
+| `NOPASS_CACHE_TTL` | `0` | seconds a *read* may reuse an unlocked key |
+| `NOPASS_AGENT_SOCK` | `$XDG_RUNTIME_DIR/nopass/agent.sock` | where the agent listens |
 | `NOPASS_FIDO2_MOCK` | — | software test authenticator state file (tests only) |
 
 `EDITOR` picks the editor for `nopass edit` (default `vi`). Clipboard uses
@@ -419,8 +455,14 @@ All optional, via environment variables:
   0600) unless you created it with `--no-passphrase`. Run
   `nopass passkey enroll` to add a FIDO2 security key, or to lock a key that
   was created unprotected.
-- The unlocked key is held in memory for the life of a single command and
-  never cached on disk, so each new command authenticates again.
+- The unlocked key is held in memory for the life of a single command, and
+  never written to disk. With `cache-ttl` set it is also held by the agent —
+  still in memory, still never on disk — for that many seconds, and only
+  reads may use it.
+- The prompt on `insert`, `rm` and friends is a check by the program, not a
+  cryptographic one: anything running as you can write entries with the
+  public key alone, or delete files from the store directly. It defends a
+  borrowed terminal, not a compromised account.
 - `NOPASS_FIDO2_MOCK` swaps the real authenticator for a file-backed software
   one. It exists for the test suite — like `NOPASS_BACKEND=plain` — and warns
   loudly; slots enrolled that way are only as safe as that file.
@@ -436,7 +478,7 @@ All optional, via environment variables:
 
 ```sh
 devbox shell                          # rust + git (+ gnupg for gpg backend)
-cargo test --workspace                # 52 tests, fully hermetic
+cargo test --workspace                # 150 tests, fully hermetic
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
@@ -444,6 +486,9 @@ cargo fmt --all
 Tests never touch your real store, keys, or network: store mechanics run
 against a plaintext test backend, native-crypto tests use throwaway
 identities in temp dirs, and sync tests push to local bare repos.
+
+Patches welcome — [CONTRIBUTING.md](CONTRIBUTING.md) covers the layout, the
+test harnesses, and the house rules.
 
 ## License
 
