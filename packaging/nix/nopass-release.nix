@@ -5,15 +5,19 @@
 #
 #   nix-build -E 'with import <nixpkgs> {}; callPackage ./nopass-release.nix {}'
 #
-# Two hashes to bump per release:
-#   src.hash    nix hash convert --hash-algo sha256 --to sri \
-#                 "$(curl -fsSL $url | sha256sum | cut -d' ' -f1)"
-#   cargoHash   set it to lib.fakeHash, build, and copy the hash the error prints
+# Two hashes to bump per release. Neither is the tarball checksum the
+# Homebrew and AUR packages use — fetchFromGitHub hashes the unpacked tree —
+# so get both the same way: set them to lib.fakeHash, build, and copy the
+# value the mismatch error prints.
+#
+#   src.hash    the unpacked source tree
+#   cargoHash   the vendored crate dependencies; changes with Cargo.lock
 {
   lib,
   fetchFromGitHub,
   rustPlatform,
   stdenv,
+  git,
   pkg-config,
   udev,
   withSecurityKey ? false,
@@ -21,24 +25,29 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "nopass";
-  version = "0.2.0";
+  version = "0.2.1";
 
   src = fetchFromGitHub {
     owner = "souravsspace";
     repo = "nopass";
     tag = "v${version}";
-    hash = "sha256-Uc1k+B4Rh/Xvd2v1zHqqGEHWO9VV+9A7XGCzBNT3d5A=";
+    hash = "sha256-b2H7xPI5Nt2Zwe4YGpigvxh/OFfPw5Gq54dRKuB3lU8=";
   };
 
-  # Replace with lib.fakeHash and build once to learn the real value after
-  # any change to Cargo.lock.
-  cargoHash = lib.fakeHash;
+  cargoHash = "sha256-zmDWXbcjraMfizO4vYTVeH2gKWbb75FK7vACNV92qzo=";
 
   cargoBuildFlags = [ "--package" "nopass-cli" ];
   buildFeatures = lib.optional withSecurityKey "security-key";
 
   nativeBuildInputs = lib.optionals withSecurityKey [ pkg-config ];
   buildInputs = lib.optionals (withSecurityKey && stdenv.hostPlatform.isLinux) [ udev ];
+
+  # The history and sync tests drive a real git, and every test wants a HOME
+  # of its own to keep away from the one running the build.
+  nativeCheckInputs = [ git ];
+  preCheck = ''
+    export HOME=$(mktemp -d)
+  '';
 
   meta = {
     description = "Fast, self-contained password manager";
