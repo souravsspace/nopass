@@ -85,7 +85,7 @@ Write the failing test, then the code that passes it. A bug fix without a
 test that reproduces the bug will be asked for one.
 
 ```sh
-cargo test --workspace          # 150 tests, hermetic: no network, no real store
+cargo test --workspace          # 162 tests, hermetic: no network, no real store
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
