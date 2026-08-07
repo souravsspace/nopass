@@ -29,6 +29,22 @@
       // aimed at accidental ones inside a package.
       "includes": ["packages/*/src/index.ts"],
       "linter": { "rules": { "performance": { "noBarrelFile": "off" } } }
+    },
+    {
+      // shadcn primitives are vendored by `shadcn add` and replaced wholesale
+      // when it is re-run, so local edits do not survive. They are formatted
+      // like the rest of the repo but not argued with.
+      "includes": ["packages/ui/src/components/**"],
+      "linter": {
+        "rules": {
+          "a11y": { "useSemanticElements": "off" },
+          "suspicious": {
+            "noArrayIndexKey": "off",
+            "noLeakedRender": "off",
+            "noUnnecessaryConditions": "off"
+          }
+        }
+      }
     }
   ]
 }
