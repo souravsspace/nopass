@@ -9,17 +9,39 @@ use nopass_core::lock::{
 };
 use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, Unlocker};
 
+mod agent;
 mod auth;
 mod fido2;
 mod setup;
 
 /// Build the crypto backend, attaching the interactive unlocker so locked
 /// (passkey/passphrase) identities prompt for authentication on use.
-fn build_crypto() -> Box<dyn Crypto> {
+fn build_crypto(policy: auth::AuthPolicy) -> Box<dyn Crypto> {
     match std::env::var("NOPASS_BACKEND").as_deref() {
         Ok("plain") => Box::new(nopass_core::PlainCrypto),
         Ok("gpg") => Box::new(nopass_core::GpgCrypto::new()),
-        _ => Box::new(NativeCrypto::new().with_unlocker(Box::new(auth::CliUnlocker))),
+        _ => Box::new(
+            NativeCrypto::new().with_unlocker(Box::new(auth::CachingUnlocker::new(policy))),
+        ),
+    }
+}
+
+/// Reading an entry may be let in by a passphrase cached earlier; changing
+/// the store never is.
+fn policy_for(command: &Option<Cmd>) -> auth::AuthPolicy {
+    match command {
+        Some(
+            Cmd::Init { .. }
+            | Cmd::Keygen { .. }
+            | Cmd::Insert { .. }
+            | Cmd::Edit { .. }
+            | Cmd::Generate { .. }
+            | Cmd::Rm { .. }
+            | Cmd::Mv { .. }
+            | Cmd::Cp { .. }
+            | Cmd::Passkey { .. },
+        ) => auth::AuthPolicy::Fresh,
+        _ => auth::AuthPolicy::Cached,
     }
 }
 
@@ -155,8 +177,26 @@ enum Cmd {
         #[command(subcommand)]
         action: PasskeyCmd,
     },
+    /// Forget the passphrase the agent is holding
+    Lock,
+    /// The passphrase cache
+    Agent {
+        #[command(subcommand)]
+        action: AgentCmd,
+    },
     /// Show every command, what it does, and where your files live
     Help,
+}
+
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// Show what is cached and for how long
+    Status,
+    /// Forget everything and shut the agent down
+    Stop,
+    /// Run the agent; started for you when a passphrase is cached
+    #[command(hide = true)]
+    Serve,
 }
 
 #[derive(Subcommand)]
@@ -202,7 +242,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let store = Store::open(default_store_dir(), build_crypto());
+    let store = Store::open(default_store_dir(), build_crypto(policy_for(&cli.command)));
 
     match cli.command {
         None => show_or_list(&store, cli.name.as_deref().unwrap_or(""), None),
@@ -262,6 +302,8 @@ fn run() -> Result<()> {
         Some(Cmd::Git { args }) => cmd_git(&store, &args),
         Some(Cmd::Update { check }) => cmd_update(check),
         Some(Cmd::Passkey { action }) => cmd_passkey(action),
+        Some(Cmd::Lock) => cmd_lock(),
+        Some(Cmd::Agent { action }) => cmd_agent(action),
         Some(Cmd::Help) => cmd_help(),
     }
 }
@@ -278,8 +320,9 @@ nopass {version} — a fast, self-contained password manager
 {REPO_URL}
 
 Entries are individually encrypted files under one directory, each one
-encrypted to your keypair. Reading a password asks for your master
-passphrase; writing one never does.
+encrypted to your keypair. Every command that reads or changes the store
+asks for your master passphrase. Reads can reuse a passphrase the agent is
+holding; changes always ask.
 
 USAGE
   nopass                            list the whole store as a tree
@@ -324,6 +367,12 @@ LOCKING THE KEY
   passkey remove-key <name>         drop one security key
   passkey disable                   remove the lock, restoring a plain key
 
+THE PASSPHRASE CACHE
+  lock                              forget the cached passphrase now
+  agent status                      what is cached, and for how long
+  agent stop                        forget it and shut the agent down
+                                    (off until cache-ttl is set; see below)
+
 MAINTENANCE
   update [--check]                  check for a new release and install it
   help                              this page
@@ -337,6 +386,8 @@ ENVIRONMENT
   NOPASS_DIR        where the store lives
   NOPASS_IDENTITY   where the private key lives (wins over the config file)
   NOPASS_CLIP_TIME  seconds before the clipboard is wiped (default 45)
+  NOPASS_CACHE_TTL  seconds a read may reuse an unlocked key (default 0,
+                    meaning never; \"cache-ttl\" in the config does the same)
   NOPASS_UNLOCK     set to \"passphrase\" to skip enrolled security keys
                     (full list in the README)
 
@@ -486,6 +537,39 @@ fn current_identity_secret(path: &std::path::Path) -> Result<String> {
         Ok(auth::CliUnlocker.unlock(&locked)?)
     } else {
         Ok(crypto::read_identity_secret(path)?)
+    }
+}
+
+fn cmd_lock() -> Result<()> {
+    if agent::clear() {
+        println!("Forgot the cached passphrase.");
+    } else {
+        println!("Nothing is cached.");
+    }
+    Ok(())
+}
+
+fn cmd_agent(action: AgentCmd) -> Result<()> {
+    match action {
+        AgentCmd::Status => {
+            match agent::status() {
+                Some((1, seconds)) => println!("One identity is cached, expires in {seconds}s."),
+                Some((n, seconds)) if n > 1 => {
+                    println!("{n} identities are cached, the last expires in {seconds}s.")
+                }
+                _ => println!("Nothing is cached."),
+            }
+            Ok(())
+        }
+        AgentCmd::Stop => {
+            if agent::stop() {
+                println!("Agent stopped.");
+            } else {
+                println!("No agent is running.");
+            }
+            Ok(())
+        }
+        AgentCmd::Serve => agent::serve(),
     }
 }
 
@@ -838,6 +922,9 @@ fn confirm_overwrite(store: &Store, name: &str, force: bool) -> Result<()> {
 }
 
 fn cmd_insert(store: &Store, name: &str, echo: bool, multiline: bool, force: bool) -> Result<()> {
+    // Adding to the store is a change to it, so prove the store is yours
+    // before anything is typed into it.
+    store.authenticate()?;
     confirm_overwrite(store, name, force)?;
 
     let contents = if multiline {
@@ -865,6 +952,9 @@ fn cmd_insert(store: &Store, name: &str, echo: bool, multiline: bool, force: boo
 }
 
 fn cmd_edit(store: &Store, name: &str) -> Result<()> {
+    // Editing an existing entry has to decrypt it anyway; a brand new one
+    // would not, and must still be authorised.
+    store.authenticate()?;
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
     let existing = store.entry_exists(name);
     let tmp = tempdir_secure()?;
@@ -906,6 +996,7 @@ fn cmd_generate(
     in_place: bool,
     force: bool,
 ) -> Result<()> {
+    store.authenticate()?;
     let length = match length {
         Some(n) => n,
         None => std::env::var("NOPASS_GENERATED_LENGTH")
@@ -926,6 +1017,9 @@ fn cmd_generate(
 }
 
 fn cmd_rm(store: &Store, name: &str, recursive: bool, force: bool) -> Result<()> {
+    // Deleting needs no key of its own, so this is the only thing standing
+    // between a passer-by and an emptied store.
+    store.authenticate()?;
     if !force && !yesno(&format!("Are you sure you would like to delete {name}?"))? {
         std::process::exit(1);
     }
