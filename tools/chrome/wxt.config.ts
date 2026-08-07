@@ -15,7 +15,6 @@ export default defineConfig({
   ...SHARED_CONFIG,
   manifest: {
     ...SHARED_MANIFEST,
-    // biome-ignore lint/style/noProcessEnv: this is a node build script
     ...(process.env.NOPASS_CHROME_KEY
       ? { key: process.env.NOPASS_CHROME_KEY }
       : {}),
