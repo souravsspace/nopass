@@ -13,7 +13,7 @@ path = "src/main.rs"
 [dependencies]
 # The version is what crates.io publishes against; the path is what local
 # builds use. Both are needed for `cargo publish` to accept the dependency.
-nopass-core = { path = "../nopass-core", version = "0.2.0" }
+nopass-core = { path = "../nopass-core", version = "0.2.1" }
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
