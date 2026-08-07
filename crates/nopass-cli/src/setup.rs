@@ -83,17 +83,22 @@ pub fn create_identity(explicit: Option<&str>, no_passphrase: bool) -> Result<(P
     Ok((path, public))
 }
 
-/// A path the user typed: `~` expanded, and a directory turned into a file
-/// inside it.
+/// A path the user typed: `~` expanded, and a directory turned into the key
+/// file inside it.
+///
+/// `~/Vaults` means a directory even before it exists — only something that
+/// looks like a filename (`work.txt`) is taken as one, since that is the
+/// only reading that makes `--identity ~/Vaults` do what it plainly says.
 fn resolve(input: &str) -> Result<PathBuf> {
     let path = config::expand_tilde(input);
     if path.as_os_str().is_empty() {
         bail!("Error: no path given for the private key.");
     }
-    if path.is_dir() || input.ends_with('/') {
-        return Ok(identity_in_dir(&path));
+    let names_a_file = path.extension().is_some() && !path.is_dir();
+    if names_a_file && !input.ends_with('/') {
+        return Ok(path);
     }
-    Ok(path)
+    Ok(identity_in_dir(&path))
 }
 
 /// Decide where the key goes, and whether that choice needs remembering.
@@ -219,6 +224,26 @@ mod tests {
         assert_eq!(
             resolve("/keys/work-key.txt").unwrap(),
             PathBuf::from("/keys/work-key.txt")
+        );
+    }
+
+    #[test]
+    fn a_path_with_no_extension_is_a_directory_even_before_it_exists() {
+        assert_eq!(
+            resolve("/Users/me/Vaults").unwrap(),
+            PathBuf::from("/Users/me/Vaults/nopass/identity.txt"),
+            "--identity ~/Vaults should not create a file called Vaults"
+        );
+    }
+
+    #[test]
+    fn an_existing_directory_wins_over_its_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dotted = tmp.path().join("my.keys");
+        std::fs::create_dir_all(&dotted).unwrap();
+        assert_eq!(
+            resolve(dotted.to_str().unwrap()).unwrap(),
+            dotted.join("nopass/identity.txt")
         );
     }
 
