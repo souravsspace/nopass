@@ -1110,11 +1110,27 @@ name = "nopass-core"
 version = "0.2.1"
 dependencies = [
  "age",
+ "anyhow",
  "base64 0.21.7",
+ "libc",
  "rand 0.9.4",
  "tempfile",
  "thiserror 2.0.18",
  "walkdir",
+ "zeroize",
+]
+
+[[package]]
+name = "nopass-host"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "nopass-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "zeroize",
 ]
 
