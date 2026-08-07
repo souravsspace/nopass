@@ -282,8 +282,11 @@ impl Store {
             .into_iter()
             .filter_map(|f| {
                 f.strip_prefix(&self.root).ok().map(|rel| {
-                    rel.to_string_lossy()
-                        .trim_end_matches(&format!(".{ENTRY_EXT}"))
+                    let rel = rel.to_string_lossy();
+                    // Only the one extension: an entry called "notes.np"
+                    // is stored as notes.np.np and keeps its own name.
+                    rel.strip_suffix(&format!(".{ENTRY_EXT}"))
+                        .unwrap_or(&rel)
                         .to_string()
                 })
             })
@@ -464,6 +467,35 @@ mod tests {
         assert!(store.show("../evil").is_err());
         assert!(store.delete("../evil", false).is_err());
         assert!(store.copy_move("../a", "b", true).is_err());
+    }
+
+    #[test]
+    fn absolute_names_rejected_everywhere() {
+        // Joining an absolute path onto the store root drops the root, so
+        // these would otherwise name files anywhere on the machine.
+        let (tmp, store) = store();
+        let outside = tmp.path().parent().unwrap().join("nopass-outside-test");
+        let outside = outside.to_string_lossy().into_owned();
+
+        assert!(store.insert(&outside, b"x").is_err());
+        assert!(store.show(&outside).is_err());
+        assert!(store.delete(&outside, true).is_err());
+        assert!(store.copy_move("a", &outside, true).is_err());
+        assert!(store.copy_move(&outside, "b", false).is_err());
+        assert!(store.list(&outside).is_err());
+        assert!(store.tree(&outside).is_err());
+        assert!(!Path::new(&outside).exists());
+    }
+
+    #[test]
+    fn an_entry_named_after_the_extension_keeps_its_name() {
+        // "notes.np" is stored as notes.np.np; stripping the extension too
+        // eagerly used to leave "notes", which nothing could then read.
+        let (_tmp, store) = store();
+        store.insert("notes.np", b"hunter2\n").unwrap();
+        assert_eq!(store.list("").unwrap(), vec!["notes.np"]);
+        assert_eq!(store.show("notes.np").unwrap(), b"hunter2\n");
+        assert_eq!(store.grep("hunter2").unwrap().len(), 1);
     }
 
     #[test]
