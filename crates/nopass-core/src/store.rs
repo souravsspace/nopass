@@ -90,6 +90,12 @@ impl Store {
         Ok(())
     }
 
+    /// Prove the caller owns the store before changing it. Reading does this
+    /// on the way past; writing and deleting call it up front.
+    pub fn authenticate(&self) -> Result<()> {
+        self.crypto.authenticate()
+    }
+
     pub fn show(&self, name: &str) -> Result<Vec<u8>> {
         paths::check_sneaky_path(name)?;
         let file = self.entry_file(name);
