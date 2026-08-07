@@ -100,8 +100,8 @@ finds it with no environment variables to set.
 You can also say it up front:
 
 ```sh
-nopass init --identity ~/Vaults          # -> ~/Vaults/nopass/identity.txt
-nopass init --identity ~/Vaults/work.txt # an exact filename is taken literally
+nopass init --identity ~/Vaults          # a directory -> ~/Vaults/nopass/identity.txt
+nopass init --identity ~/Vaults/work.txt # a filename is taken literally
 ```
 
 Reading a password asks for the passphrase every time, like `pass` does.
@@ -247,6 +247,7 @@ nopass mv [-f] old new                   move + re-encrypt
 nopass cp [-f] old new                   copy + re-encrypt
 nopass git <args>...                     run any git command in the store
 nopass update [--check]                  update nopass itself
+nopass help                              full command tour + your file paths
 nopass passkey enroll [--security-key] [--pin] [--no-touchid]
                                          lock the identity behind auth
 nopass passkey add-key [--label name] [--pin]
