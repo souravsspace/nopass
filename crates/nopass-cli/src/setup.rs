@@ -1,0 +1,208 @@
+//! First-run setup: deciding where this machine's private key lives and
+//! locking it behind a master passphrase before it is ever written.
+//!
+//! A password manager that silently drops an unprotected key somewhere in
+//! `~/.config` teaches the user nothing about what they now have to back up.
+//! So the first time nopass needs a keypair it says where the key is going,
+//! offers to put it elsewhere, and asks for a passphrase — after which every
+//! read of a password requires it.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use nopass_core::config;
+use nopass_core::crypto;
+use nopass_core::lock::SecretString;
+
+use crate::prompt_hidden;
+
+/// Shown whenever setup needs an answer and stdin has none.
+const UNATTENDED_HINT: &str = "\nError: first-run setup needs a terminal to ask where your \
+     private key should live\nand what passphrase protects it. For unattended setup, answer \
+     with flags:\n  nopass init --identity <path> --no-passphrase";
+
+/// Ask for a visible answer, turning "nothing on stdin" into the hint above.
+fn ask(prompt: &str) -> Result<String> {
+    crate::prompt_line(prompt).map_err(|_| anyhow::anyhow!("{UNATTENDED_HINT}"))
+}
+
+/// Ask for an answer with echo off, same treatment.
+fn ask_hidden(prompt: &str) -> Result<String> {
+    prompt_hidden(prompt).map_err(|_| anyhow::anyhow!("{UNATTENDED_HINT}"))
+}
+
+/// Filename used when the user names a directory rather than a file.
+const IDENTITY_FILENAME: &str = "identity.txt";
+
+/// Where a new keypair would be written, without asking anything. Used to
+/// report "an identity already exists" before setup starts talking.
+pub fn target_path(explicit: Option<&str>) -> Result<PathBuf> {
+    match explicit {
+        Some(path) => resolve(path),
+        None => Ok(crypto::default_identity_file()),
+    }
+}
+
+/// Create this machine's keypair. Returns the path it was written to and the
+/// public recipient string.
+pub fn create_identity(explicit: Option<&str>, no_passphrase: bool) -> Result<(PathBuf, String)> {
+    let (path, remember) = choose_location(explicit, no_passphrase)?;
+    let passphrase = choose_passphrase(no_passphrase)?;
+
+    let public = match &passphrase {
+        Some(passphrase) => crypto::generate_identity_locked(&path, passphrase)?,
+        None => crypto::generate_identity(&path)?,
+    };
+
+    // Only record a location the user actually chose; the default path and
+    // NOPASS_IDENTITY both resolve on their own.
+    if remember {
+        let config_file = config::default_config_file();
+        config::set_identity_path(&config_file, &path).with_context(|| {
+            format!(
+                "could not record the key location in {}",
+                config_file.display()
+            )
+        })?;
+    }
+
+    report(&path, &public, passphrase.is_some(), remember);
+    Ok((path, public))
+}
+
+/// A path the user typed: `~` expanded, and a directory turned into a file
+/// inside it.
+fn resolve(input: &str) -> Result<PathBuf> {
+    let path = config::expand_tilde(input);
+    if path.as_os_str().is_empty() {
+        bail!("Error: no path given for the private key.");
+    }
+    if path.is_dir() || input.ends_with('/') {
+        return Ok(path.join(IDENTITY_FILENAME));
+    }
+    Ok(path)
+}
+
+/// Decide where the key goes, and whether that choice needs remembering.
+fn choose_location(explicit: Option<&str>, unattended: bool) -> Result<(PathBuf, bool)> {
+    if let Some(path) = explicit {
+        return Ok((resolve(path)?, true));
+    }
+
+    // Nothing to ask when the location is already settled: an environment
+    // variable, a previous run's config file, a key that already exists
+    // (the `keygen --force` case), or `--no-passphrase`, which is how a
+    // script says it has nobody to answer questions.
+    let default = crypto::default_identity_file();
+    if unattended
+        || std::env::var_os("NOPASS_IDENTITY").is_some()
+        || config::read_identity_path(&config::default_config_file()).is_some()
+        || default.exists()
+    {
+        return Ok((default, false));
+    }
+
+    println!("Setting up nopass.\n");
+    println!("Everything in your store is encrypted to one private key. That file is");
+    println!("yours to keep and to back up — without it, no password can be recovered.\n");
+    println!("Where should the private key live?");
+    println!("  [1] {}   (default)", default.display());
+    println!("  [2] a directory you choose");
+
+    match ask("Choice [1]: ")?.as_str() {
+        "" | "1" => Ok((default, false)),
+        "2" => {
+            let dir = ask("Directory: ")?;
+            if dir.is_empty() {
+                bail!("Error: no directory given for the private key.");
+            }
+            let dir = config::expand_tilde(&dir);
+            std::fs::create_dir_all(&dir)
+                .with_context(|| format!("could not create {}", dir.display()))?;
+            Ok((dir.join(IDENTITY_FILENAME), true))
+        }
+        other => bail!("Error: {other:?} is not one of the choices (1 or 2)."),
+    }
+}
+
+/// Ask for the master passphrase, twice. `None` means the user opted out and
+/// the key will sit on disk unprotected.
+fn choose_passphrase(no_passphrase: bool) -> Result<Option<SecretString>> {
+    if no_passphrase {
+        eprintln!(
+            "Warning: creating an unprotected private key. Anyone who can read the\n\
+             file can read every password. Run \"nopass passkey enroll\" to lock it."
+        );
+        return Ok(None);
+    }
+
+    println!("\nChoose a master passphrase. nopass asks for it every time it reads");
+    println!("a password, and it is the only thing protecting the key file.\n");
+
+    let passphrase = ask_hidden("Master passphrase: ")?;
+    if passphrase.is_empty() {
+        bail!("Error: passphrase must not be empty.");
+    }
+    let again = ask_hidden("Retype master passphrase: ")?;
+    if passphrase != again {
+        bail!("Error: the entered passphrases do not match.");
+    }
+    Ok(Some(SecretString::from(passphrase)))
+}
+
+fn report(path: &Path, public: &str, locked: bool, remembered: bool) {
+    let state = if locked {
+        "locked with your passphrase"
+    } else {
+        "unprotected"
+    };
+    println!("\nPrivate key: {} ({state}, mode 0600)", path.display());
+    println!("Public key:  {public}");
+    if remembered {
+        println!("Remembered:  {}", config::default_config_file().display());
+    }
+    println!(
+        "\nBack up the private key file. If you lose it{}, every",
+        if locked {
+            " or forget the passphrase"
+        } else {
+            ""
+        }
+    );
+    println!("password in your store becomes unreadable.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_directory_gets_the_default_filename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        assert_eq!(
+            resolve(dir).unwrap(),
+            tmp.path().join(IDENTITY_FILENAME),
+            "an existing directory should hold identity.txt"
+        );
+        // A trailing slash means "directory" even before it exists.
+        assert_eq!(
+            resolve("/nowhere/keys/").unwrap(),
+            PathBuf::from("/nowhere/keys").join(IDENTITY_FILENAME)
+        );
+    }
+
+    #[test]
+    fn a_filename_is_taken_literally() {
+        assert_eq!(
+            resolve("/keys/work-key.txt").unwrap(),
+            PathBuf::from("/keys/work-key.txt")
+        );
+    }
+
+    #[test]
+    fn an_empty_path_is_rejected() {
+        assert!(resolve("").is_err());
+        assert!(resolve("   ").is_err());
+    }
+}
