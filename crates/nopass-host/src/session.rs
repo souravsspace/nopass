@@ -96,7 +96,10 @@ impl Session {
             .as_ref()
             .context("this identity has no passphrase slot to open")?;
 
-        let secret = Zeroizing::new(decrypt_slot(slot, &SecretString::from(passphrase.to_owned()))?);
+        let secret = Zeroizing::new(decrypt_slot(
+            slot,
+            &SecretString::from(passphrase.to_owned()),
+        )?);
         agent::put(&cache_key(&locked), &secret, self.ttl);
         Ok(self.ttl)
     }
