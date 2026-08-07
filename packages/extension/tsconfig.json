@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vitest/globals"]
+  },
+  // `entrypoints/` imports WXT's generated `#imports` module and is
+  // type-checked by each target's `wxt prepare` instead.
+  "include": ["lib", "components", "test"],
+  "exclude": ["lib/browser-bridge.ts"]
+}
