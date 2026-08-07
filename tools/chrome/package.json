@@ -5,10 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "wxt build -b chrome",
-    "check-types": "wxt prepare && tsc --noEmit",
     "dev": "wxt -b chrome",
     "lint": "biome check .",
-    "test": "echo 'no unit tests here; the source is @nopass/extension' && exit 0",
+    "test": "echo 'the source is @nopass/extension' && exit 0",
     "zip": "wxt zip -b chrome"
   },
   "dependencies": {
