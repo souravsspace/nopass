@@ -8,18 +8,33 @@
 use nopass_host::origin::{host_of, matches, Candidate};
 
 fn entry(name: &str) -> Candidate {
-    Candidate { name: name.to_string(), url: None }
+    Candidate {
+        name: name.to_string(),
+        url: None,
+    }
 }
 
 fn entry_with_url(name: &str, url: &str) -> Candidate {
-    Candidate { name: name.to_string(), url: Some(url.to_string()) }
+    Candidate {
+        name: name.to_string(),
+        url: Some(url.to_string()),
+    }
 }
 
 #[test]
 fn an_https_origin_yields_its_host() {
-    assert_eq!(host_of("https://mail.google.com").as_deref(), Some("mail.google.com"));
-    assert_eq!(host_of("http://localhost:3000").as_deref(), Some("localhost"));
-    assert_eq!(host_of("https://EXAMPLE.com").as_deref(), Some("example.com"));
+    assert_eq!(
+        host_of("https://mail.google.com").as_deref(),
+        Some("mail.google.com")
+    );
+    assert_eq!(
+        host_of("http://localhost:3000").as_deref(),
+        Some("localhost")
+    );
+    assert_eq!(
+        host_of("https://EXAMPLE.com").as_deref(),
+        Some("example.com")
+    );
 }
 
 #[test]
@@ -67,7 +82,10 @@ fn a_parent_page_does_not_match_a_subdomain_entry() {
 #[test]
 fn a_bare_suffix_entry_never_matches_everything() {
     for name in ["web/com", "com", "web/co.uk"] {
-        assert!(!matches(&entry(name), "google.com"), "{name} must not match google.com");
+        assert!(
+            !matches(&entry(name), "google.com"),
+            "{name} must not match google.com"
+        );
     }
 }
 
