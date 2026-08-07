@@ -1,9 +1,9 @@
-# Attaches prebuilt binaries and a .deb to a release, so installing nopass
-# is a download rather than a five-minute Rust build. Also what makes
-# `cargo binstall nopass-cli` work.
+# Attaches prebuilt binaries to a release, so installing nopass is a
+# download rather than a five-minute Rust build. Also what makes
+# `cargo binstall nopass-cli` and the npm package work.
 #
 # Runs when a v* tag is pushed. To fill in a release that already exists,
-# run it by hand: gh workflow run release.yml -f tag=v0.2.0
+# run it by hand: gh workflow run release.yml -f tag=v0.2.1
 name: release
 
 on:
@@ -92,40 +92,8 @@ jobs:
           name: ${{ matrix.target }}
           path: dist/*.tar.gz*
 
-  debs:
-    name: deb (${{ matrix.arch }})
-    needs: guard
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            os: ubuntu-latest
-          - arch: arm64
-            os: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-
-      - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
-
-      - name: Build
-        run: |
-          cargo deb --package nopass-cli \
-            --maintainer "Sourav <souravsspace@gmail.com>" \
-            -- --locked
-          mkdir -p dist && cp target/debian/*.deb dist/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deb-${{ matrix.arch }}
-          path: dist/*.deb
-
   upload:
-    needs: [binaries, debs]
+    needs: binaries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -138,7 +106,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
-          (cd dist && shasum -a 256 *.tar.gz *.deb > checksums.txt)
+          (cd dist && shasum -a 256 *.tar.gz > checksums.txt)
           # A tag push arrives before the release exists.
           gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1 ||
             gh release create "$tag" --title "$tag" --generate-notes --repo "${{ github.repository }}"
