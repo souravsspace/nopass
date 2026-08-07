@@ -12,10 +12,14 @@ fn store_with(entries: &[(&str, &str)]) -> (TempDir, Store) {
     let store = Store::open(dir.path(), Box::new(PlainCrypto));
     // PlainCrypto ignores recipients, but the store still refuses to write
     // into a directory that names none.
-    store.init(&["test-recipient".to_string()], "").expect("the store initialises");
+    store
+        .init(&["test-recipient".to_string()], "")
+        .expect("the store initialises");
 
     for (name, body) in entries {
-        store.insert(name, body.as_bytes()).expect("the entry writes");
+        store
+            .insert(name, body.as_bytes())
+            .expect("the entry writes");
     }
     (dir, store)
 }
@@ -41,7 +45,9 @@ fn reply(host: &mut Host, request: Value) -> Value {
 }
 
 fn error_code(response: &Value) -> &str {
-    response["error"]["code"].as_str().expect("an error has a code")
+    response["error"]["code"]
+        .as_str()
+        .expect("an error has a code")
 }
 
 #[test]
@@ -57,7 +63,10 @@ fn hello_reports_the_protocol_version() {
 #[test]
 fn hello_reports_a_store_that_was_never_initialised() {
     let dir = TempDir::new().expect("a temporary directory");
-    let mut host = Host::new(Store::open(dir.path().join("absent"), Box::new(PlainCrypto)));
+    let mut host = Host::new(Store::open(
+        dir.path().join("absent"),
+        Box::new(PlainCrypto),
+    ));
 
     let response = reply(&mut host, json!({ "id": 1, "verb": "hello", "version": 1 }));
     assert_eq!(response["store"], json!("missing"));
@@ -88,10 +97,16 @@ fn search_offers_only_entries_for_that_origin() {
     );
 
     let matches = response["matches"].as_array().expect("a list of matches");
-    let names: Vec<&str> = matches.iter().map(|m| m["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = matches
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
     assert_eq!(names, vec!["web/google.com"]);
     assert_eq!(matches[0]["username"], json!("sana@example.com"));
-    assert!(!response.to_string().contains("hunter2"), "search leaked a password");
+    assert!(
+        !response.to_string().contains("hunter2"),
+        "search leaked a password"
+    );
 }
 
 #[test]
@@ -108,19 +123,28 @@ fn search_on_an_unrelated_origin_offers_nothing() {
 #[test]
 fn get_returns_the_password_and_the_metadata_around_it() {
     let (_dir, mut host) = sample();
-    let response = reply(&mut host, json!({ "id": 5, "verb": "get", "entry": "web/google.com" }));
+    let response = reply(
+        &mut host,
+        json!({ "id": 5, "verb": "get", "entry": "web/google.com" }),
+    );
 
     let entry = &response["entry"];
     assert_eq!(entry["password"], json!("hunter2"));
     assert_eq!(entry["username"], json!("sana@example.com"));
     assert_eq!(entry["url"], json!("https://google.com"));
-    assert_eq!(entry["totp"], json!("otpauth://totp/g?secret=JBSWY3DPEHPK3PXP"));
+    assert_eq!(
+        entry["totp"],
+        json!("otpauth://totp/g?secret=JBSWY3DPEHPK3PXP")
+    );
 }
 
 #[test]
 fn get_returns_an_entry_that_is_only_a_password() {
     let (_dir, mut host) = sample();
-    let response = reply(&mut host, json!({ "id": 6, "verb": "get", "entry": "mail/fastmail" }));
+    let response = reply(
+        &mut host,
+        json!({ "id": 6, "verb": "get", "entry": "mail/fastmail" }),
+    );
 
     assert_eq!(response["entry"]["password"], json!("fm-pw"));
     assert!(response["entry"].get("username").is_none());
@@ -129,7 +153,10 @@ fn get_returns_an_entry_that_is_only_a_password() {
 #[test]
 fn get_on_an_absent_entry_says_so() {
     let (_dir, mut host) = sample();
-    let response = reply(&mut host, json!({ "id": 7, "verb": "get", "entry": "web/nowhere" }));
+    let response = reply(
+        &mut host,
+        json!({ "id": 7, "verb": "get", "entry": "web/nowhere" }),
+    );
 
     assert_eq!(response["ok"], json!(false));
     assert_eq!(error_code(&response), "not_found");
@@ -148,20 +175,35 @@ fn get_refuses_to_climb_out_of_the_store() {
 #[test]
 fn generate_returns_a_password_of_the_requested_length() {
     let (_dir, mut host) = sample();
-    let response =
-        reply(&mut host, json!({ "id": 9, "verb": "generate", "length": 24, "symbols": true }));
+    let response = reply(
+        &mut host,
+        json!({ "id": 9, "verb": "generate", "length": 24, "symbols": true }),
+    );
 
-    assert_eq!(response["password"].as_str().expect("a password").chars().count(), 24);
+    assert_eq!(
+        response["password"]
+            .as_str()
+            .expect("a password")
+            .chars()
+            .count(),
+        24
+    );
 }
 
 #[test]
 fn generate_does_not_store_what_it_produced() {
     let (_dir, mut host) = sample();
     let before = reply(&mut host, json!({ "id": 10, "verb": "list" }));
-    reply(&mut host, json!({ "id": 11, "verb": "generate", "length": 16, "symbols": false }));
+    reply(
+        &mut host,
+        json!({ "id": 11, "verb": "generate", "length": 16, "symbols": false }),
+    );
     let after = reply(&mut host, json!({ "id": 12, "verb": "list" }));
 
-    assert_eq!(before["entries"], after["entries"], "generate must not write (ADR-0002)");
+    assert_eq!(
+        before["entries"], after["entries"],
+        "generate must not write (ADR-0002)"
+    );
 }
 
 #[test]
@@ -175,7 +217,11 @@ fn a_mutating_verb_is_refused_and_changes_nothing() {
             json!({ "id": 14, "verb": verb, "entry": "web/google.com", "password": "owned" }),
         );
         assert_eq!(response["ok"], json!(false), "{verb} was not refused");
-        assert_eq!(error_code(&response), "read_only", "{verb} got the wrong code");
+        assert_eq!(
+            error_code(&response),
+            "read_only",
+            "{verb} got the wrong code"
+        );
     }
 
     let after = reply(&mut host, json!({ "id": 15, "verb": "list" }));
