@@ -1625,3 +1625,129 @@ fn a_trailing_slash_on_the_identity_flag_means_directory() {
         .success()
         .stdout("hunter2\n");
 }
+
+// ---- the help page ----
+
+#[test]
+fn help_lists_every_command_and_links_the_repo() {
+    let machine = FreshMachine::new();
+    let out = machine.cmd().arg("help").assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+
+    for command in [
+        "init",
+        "keygen",
+        "ls",
+        "show",
+        "find",
+        "grep",
+        "insert",
+        "generate",
+        "edit",
+        "rm",
+        "mv",
+        "cp",
+        "git",
+        "update",
+        "passkey status",
+        "passkey enroll",
+        "passkey add-key",
+        "passkey remove-key",
+        "passkey disable",
+        "help",
+    ] {
+        assert!(
+            text.contains(command),
+            "help never mentions {command}:\n{text}"
+        );
+    }
+    assert!(
+        text.contains("https://github.com/souravsspace/nopass"),
+        "{text}"
+    );
+    assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+}
+
+#[test]
+fn help_says_where_this_machines_files_are() {
+    let machine = FreshMachine::new();
+
+    // Before setup it admits there is no key yet.
+    machine
+        .cmd()
+        .arg("help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("not created yet"));
+
+    machine.set_up_with("master");
+
+    // Afterwards it points at the real paths and reports the lock state,
+    // without asking for the passphrase to do it.
+    machine
+        .cmd()
+        .arg("help")
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains(machine.default_identity().display().to_string())
+                .and(predicate::str::contains("(locked)")),
+        );
+}
+
+#[test]
+fn help_reports_an_unprotected_key_as_such() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .args(["init", "--no-passphrase"])
+        .assert()
+        .success();
+    machine
+        .cmd()
+        .arg("help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(unprotected)"));
+}
+
+#[test]
+fn help_mentions_the_config_file_only_once_there_is_one() {
+    let machine = FreshMachine::new();
+    let chosen = machine.dir.path().join("Elsewhere");
+
+    machine
+        .cmd()
+        .arg("help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config        ").not());
+
+    machine
+        .cmd()
+        .args(["init", "--identity", chosen.to_str().unwrap()])
+        .write_stdin("master\nmaster\n")
+        .assert()
+        .success();
+
+    machine.cmd().arg("help").assert().success().stdout(
+        predicate::str::contains(machine.config().display().to_string()).and(
+            predicate::str::contains(chosen.join("nopass/identity.txt").display().to_string()),
+        ),
+    );
+}
+
+#[test]
+fn the_short_help_points_at_the_long_one() {
+    Command::cargo_bin("nopass")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("nopass help").and(predicate::str::contains(
+                "https://github.com/souravsspace/nopass",
+            )),
+        );
+}
