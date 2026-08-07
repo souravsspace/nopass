@@ -12,8 +12,6 @@ use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, U
 mod auth;
 mod fido2;
 mod setup;
-#[cfg(target_os = "macos")]
-mod touchid;
 
 /// Build the crypto backend, attaching the interactive unlocker so locked
 /// (passkey/passphrase) identities prompt for authentication on use.
@@ -152,8 +150,7 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
-    /// Lock the identity behind authentication (passphrase, security key,
-    /// Touch ID)
+    /// Lock the identity behind authentication (passphrase, security key)
     Passkey {
         #[command(subcommand)]
         action: PasskeyCmd,
@@ -166,9 +163,6 @@ enum Cmd {
 enum PasskeyCmd {
     /// Encrypt the identity so every access requires authentication
     Enroll {
-        /// Skip the macOS Touch ID slot (passphrase only)
-        #[arg(long)]
-        no_touchid: bool,
         /// Also enroll a FIDO2 security key (passkey)
         #[arg(long)]
         security_key: bool,
@@ -326,7 +320,6 @@ LOCKING THE KEY
   passkey enroll                    lock it, or change the passphrase
       --security-key                also enroll a FIDO2 key (e.g. a YubiKey)
       --pin                         require the key's PIN as well as a touch
-      --no-touchid                  skip the macOS Touch ID slot
   passkey add-key [--label <name>]  enroll another security key
   passkey remove-key <name>         drop one security key
   passkey disable                   remove the lock, restoring a plain key
@@ -344,7 +337,7 @@ ENVIRONMENT
   NOPASS_DIR        where the store lives
   NOPASS_IDENTITY   where the private key lives (wins over the config file)
   NOPASS_CLIP_TIME  seconds before the clipboard is wiped (default 45)
-  NOPASS_UNLOCK     set to \"passphrase\" to skip Touch ID and security keys
+  NOPASS_UNLOCK     set to \"passphrase\" to skip enrolled security keys
                     (full list in the README)
 
 Losing the private key, or forgetting the passphrase, means losing every
@@ -500,11 +493,10 @@ fn cmd_passkey(action: PasskeyCmd) -> Result<()> {
     let identity_file = crypto::default_identity_file();
     match action {
         PasskeyCmd::Enroll {
-            no_touchid,
             security_key,
             pin,
             label,
-        } => cmd_passkey_enroll(&identity_file, no_touchid, security_key, pin, label),
+        } => cmd_passkey_enroll(&identity_file, security_key, pin, label),
         PasskeyCmd::AddKey { label, pin } => cmd_passkey_add_key(&identity_file, label, pin),
         PasskeyCmd::RemoveKey { label } => cmd_passkey_remove_key(&identity_file, &label),
         PasskeyCmd::Disable => cmd_passkey_disable(&identity_file),
@@ -514,7 +506,6 @@ fn cmd_passkey(action: PasskeyCmd) -> Result<()> {
 
 fn cmd_passkey_enroll(
     identity_file: &std::path::Path,
-    no_touchid: bool,
     security_key: bool,
     want_pin: bool,
     label: Option<String>,
@@ -540,9 +531,6 @@ fn cmd_passkey_enroll(
     }
     let passphrase_slot = Some(encrypt_slot(&secret, &SecretString::from(passphrase))?);
 
-    // Optional Touch ID slot (macOS only, and only on a signed build).
-    let keychain_slot = enroll_touchid_slot(&secret, no_touchid);
-
     // Optional FIDO2 security key. Enrolled before anything is written, so a
     // key that refuses leaves the identity exactly as it was.
     let fido2_slots = if security_key {
@@ -554,7 +542,6 @@ fn cmd_passkey_enroll(
     let locked = LockedIdentity {
         public: crypto::public_from_secret(&secret),
         passphrase_slot,
-        keychain_slot,
         fido2_slots,
     };
     write_identity_file(identity_file, &locked.serialize())?;
@@ -681,9 +668,6 @@ fn read_locked_identity(identity_file: &std::path::Path) -> Result<LockedIdentit
 
 fn print_slots(locked: &LockedIdentity) {
     println!("Slots:");
-    if locked.has_keychain() {
-        println!("  - Touch ID (macOS Secure Enclave)");
-    }
     for slot in &locked.fido2_slots {
         let pin = if slot.requires_pin { " + PIN" } else { "" };
         println!(
@@ -707,46 +691,13 @@ fn short_id(credential_id: &[u8]) -> String {
         + "…"
 }
 
-#[cfg(target_os = "macos")]
-fn enroll_touchid_slot(secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
-    if no_touchid {
-        return None;
-    }
-    match touchid::enroll_slot(secret) {
-        Ok(slot) => Some(slot),
-        Err(e) => {
-            eprintln!("Skipping Touch ID slot: {e}");
-            None
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn enroll_touchid_slot(_secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
-    if !no_touchid {
-        eprintln!("Note: Touch ID is a macOS feature; skipping that slot.");
-    }
-    None
-}
-
 fn cmd_passkey_disable(identity_file: &std::path::Path) -> Result<()> {
     let locked = read_locked_identity(identity_file)?;
     let secret = auth::CliUnlocker.unlock(&locked)?;
     let public = crypto::write_plaintext_identity(identity_file, &secret)?;
-    remove_touchid_slot();
     println!("Identity unlocked and stored in plaintext for {public}.");
     Ok(())
 }
-
-#[cfg(target_os = "macos")]
-fn remove_touchid_slot() {
-    if let Err(e) = touchid::remove_key() {
-        eprintln!("Note: could not remove the Touch ID key: {e}");
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn remove_touchid_slot() {}
 
 fn cmd_passkey_status(identity_file: &std::path::Path) -> Result<()> {
     let Ok(contents) = std::fs::read_to_string(identity_file) else {
