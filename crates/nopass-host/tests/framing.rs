@@ -29,7 +29,9 @@ fn a_frame_round_trips() {
     let bytes = framed(json!({ "id": 1, "verb": "status" }));
     let mut reader = Cursor::new(bytes);
 
-    let value = read_frame(&mut reader).expect("reading works").expect("a frame is there");
+    let value = read_frame(&mut reader)
+        .expect("reading works")
+        .expect("a frame is there");
     assert_eq!(value, json!({ "id": 1, "verb": "status" }));
 }
 
@@ -56,7 +58,9 @@ fn several_frames_come_back_in_order() {
 fn a_frame_delivered_one_byte_at_a_time_still_arrives() {
     let mut reader = Trickle(Cursor::new(framed(json!({ "id": 9, "verb": "lock" }))));
 
-    let value = read_frame(&mut reader).expect("reading works").expect("a frame is there");
+    let value = read_frame(&mut reader)
+        .expect("reading works")
+        .expect("a frame is there");
     assert_eq!(value, json!({ "id": 9, "verb": "lock" }));
 }
 
