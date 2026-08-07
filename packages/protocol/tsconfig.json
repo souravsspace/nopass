@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // TextEncoder/TextDecoder are web-standard globals in every runtime that
+    // loads this package: the browser, bun and node alike.
+    "lib": ["ES2023", "DOM"],
+    "types": ["vitest/globals"]
+  },
+  "include": ["src", "test"]
+}
