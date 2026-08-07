@@ -248,7 +248,7 @@ nopass cp [-f] old new                   copy + re-encrypt
 nopass git <args>...                     run any git command in the store
 nopass update [--check]                  update nopass itself
 nopass help                              full command tour + your file paths
-nopass passkey enroll [--security-key] [--pin] [--no-touchid]
+nopass passkey enroll [--security-key] [--pin]
                                          lock the identity behind auth
 nopass passkey add-key [--label name] [--pin]
                                          enroll another security key
@@ -262,12 +262,11 @@ Aliases: `ls`=`list`, `rm`=`remove`/`delete`, `mv`=`rename`, `cp`=`copy`.
 ## Locking your identity (passkey)
 
 A key made by `nopass init` is already locked with the master passphrase you
-chose. `passkey` is how you change what opens it — add Touch ID or a security
-key, change the passphrase, or lock a key that was created with
-`--no-passphrase`:
+chose. `passkey` is how you change what opens it — add a security key, change
+the passphrase, or lock a key that was created with `--no-passphrase`:
 
 ```sh
-nopass passkey enroll                   # passphrase (and Touch ID on macOS, signed builds)
+nopass passkey enroll                   # passphrase only
 nopass passkey enroll --security-key    # …plus a FIDO2 key, e.g. a YubiKey
 ```
 
@@ -283,9 +282,9 @@ can open it. Changing a passphrase requires knowing the current one.
 
 Set up a way back **before** you need it. Any one of these is enough:
 
-- **Enroll a second factor.** `nopass passkey enroll --security-key` (or
-  Touch ID). Slots are independent — a security key you still have unlocks
-  the identity, and `nopass passkey enroll` then sets a new passphrase.
+- **Enroll a second factor.** `nopass passkey enroll --security-key`. Slots
+  are independent — a security key you still have unlocks the identity, and
+  `nopass passkey enroll` then sets a new passphrase.
 - **Keep an offline copy of the unlocked key.** `nopass passkey disable`
   writes the plaintext key back to the identity file; copy that file to a USB
   stick or paper you keep somewhere safe, then re-lock with
@@ -308,13 +307,8 @@ slot recovers the identity.
   passphrase is run through scrypt; the identity is sealed with age.
 - **Security key slots** *(FIDO2, optional)* — any number of hardware keys,
   via the CTAP2 `hmac-secret` extension. See below.
-- **Touch ID slot** *(macOS, optional)* — a non-extractable key in the Secure
-  Enclave, gated by Touch ID. Build with `--features touchid` and a
-  **code-signed** binary with keychain entitlements; an unsigned build (plain
-  `cargo install`) can't create Secure Enclave keys, so that slot is skipped.
-
-Unlocking tries Touch ID, then any enrolled security key, then the passphrase,
-falling through whenever a factor is missing or refuses. `NOPASS_UNLOCK=passphrase`
+Unlocking tries any enrolled security key, then the passphrase, falling
+through whenever the key is missing or refuses. `NOPASS_UNLOCK=passphrase`
 skips straight to typing.
 
 ```sh
@@ -325,37 +319,21 @@ nopass passkey disable       # unlock (prompts), then store plaintext again
 Re-running `enroll` on an already-locked identity unlocks it first, so you can
 change the passphrase or add slots later.
 
-### Biometric unlock, per platform
+### Biometric unlock
 
-| Platform | Biometric slot | Status |
-|---|---|---|
-| macOS | Touch ID, via a Secure Enclave key | works, **but only on a signed build** |
-| Windows | Windows Hello | not implemented — use a security key |
-| Linux | — | nothing that binds keys; use a security key |
+nopass has no biometric slot on any platform, by design.
 
-**macOS.** The Touch ID slot enrolls a biometry-gated key inside the Secure
-Enclave and encrypts your identity to it, so the secret is recoverable only
-after a successful Touch ID prompt. macOS grants that only to binaries signed
-with keychain entitlements authorized by an embedded provisioning profile. A
-build from source — `cargo install`, or Homebrew compiling the formula —
-cannot do it, and says so:
+Touch ID was implemented and removed: macOS only hands out biometry-gated
+Secure Enclave keys to binaries signed with keychain entitlements authorized
+by an embedded provisioning profile, so no build from source — `cargo
+install`, or Homebrew compiling the formula — could ever use it. Windows Hello
+may be reachable through the WebAuthn `hmac-secret` extension, but that is
+unproven. Linux fingerprint readers (fprintd) only prove someone touched the
+sensor; they release no key material, so a slot built on one would be
+bypassed by reading the identity file — worse than not having it.
 
-```
-Skipping Touch ID slot: this build of nopass is not code-signed, so macOS
-refuses to create a Secure Enclave key. Install the signed release to use
-Touch ID; a passphrase or security key works with any build.
-```
-
-Everything else works normally; only this slot is unavailable. Building a
-signed release is documented in [RELEASING.md](RELEASING.md) and scripted in
-[`packaging/macos/sign.sh`](packaging/macos/sign.sh).
-
-**Windows and Linux.** No biometric slot yet. Windows Hello may be reachable
-through the WebAuthn API's `hmac-secret` extension — unverified. Linux
-fingerprint readers (fprintd) only prove someone touched the sensor; they
-release no key material, so a slot built on them would be bypassed by reading
-the identity file, and shipping that would be worse than not having it. On
-both platforms a FIDO2 security key gives real hardware-backed unlock today.
+A FIDO2 security key gives real hardware-backed unlock on all three platforms
+today, from any build.
 
 ### Security keys (passkeys)
 
@@ -406,7 +384,7 @@ All optional, via environment variables:
 | `NOPASS_CHARACTER_SET_NO_SYMBOLS` | alnum | charset for `generate -n` |
 | `NOPASS_CLIP_TIME` | `45` | seconds before clipboard clears |
 | `NOPASS_GPG_OPTS` | — | extra flags for the gpg backend |
-| `NOPASS_UNLOCK` | — | `passphrase` skips Touch ID and security keys |
+| `NOPASS_UNLOCK` | — | `passphrase` skips enrolled security keys |
 | `NOPASS_FIDO2_MOCK` | — | software test authenticator state file (tests only) |
 
 `EDITOR` picks the editor for `nopass edit` (default `vi`). Clipboard uses
@@ -439,8 +417,8 @@ All optional, via environment variables:
   in entry names.
 - The secret identity is encrypted at rest with your master passphrase (mode
   0600) unless you created it with `--no-passphrase`. Run
-  `nopass passkey enroll` to add a FIDO2 security key and/or Touch ID, or to
-  lock a key that was created unprotected.
+  `nopass passkey enroll` to add a FIDO2 security key, or to lock a key that
+  was created unprotected.
 - The unlocked key is held in memory for the life of a single command and
   never cached on disk, so each new command authenticates again.
 - `NOPASS_FIDO2_MOCK` swaps the real authenticator for a file-backed software
