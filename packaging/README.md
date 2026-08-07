@@ -36,10 +36,10 @@ an ancestor of `main`:
 | crates.io | `CARGO_REGISTRY_TOKEN` | `cargo login` prints it, or crates.io → Account Settings → API Tokens |
 | homebrew tap | `TAP_TOKEN` | a GitHub PAT with `contents: write` on `souravsspace/homebrew-tap` |
 | aur | `AUR_SSH_KEY` | the private half of the SSH key registered on your AUR account |
-| copr | `COPR_CONFIG` | the whole `~/.config/copr` file from copr.fedorainfracloud.org → API |
 
-The AUR and COPR jobs read `packaging/aur/*` and `packaging/rpm/nopass.spec`
-**at the tag**, so bump those files before tagging.
+The AUR job reads `packaging/aur/*` **at the tag**, so bump those files
+before tagging. It also needs the package to exist on the AUR already —
+see [aur/README.md](aur/README.md), which is still a TODO.
 
 ## Written, not published yet
 
@@ -50,7 +50,6 @@ an account or a merge request somewhere.
 |---|---|---|---|
 | **nixpkgs** (upstream) | [`nix/nopass-release.nix`](nix/nopass-release.nix) | `nix-env -iA nixpkgs.nopass` | a PR to NixOS/nixpkgs, and a `cargoHash` bump per release |
 | **AUR** (Arch) | [`aur/PKGBUILD`](aur/PKGBUILD), [`aur/.SRCINFO`](aur/.SRCINFO) | `yay -S nopass` | an AUR account with an SSH key; push to `aur@aur.archlinux.org:nopass.git` |
-| **Fedora / RHEL** | [`rpm/nopass.spec`](rpm/nopass.spec) | `dnf copr enable souravsspace/nopass && dnf install nopass` | a Fedora account; COPR builds and hosts it for free |
 
 ## Worth considering, nothing written
 
@@ -58,7 +57,7 @@ an account or a merge request somewhere.
 |---|---|---|
 | **homebrew-core** | `brew install nopass`, no tap | Homebrew's notability bar: ~30 forks / 30 watchers / 75 stars, or a maintainer's judgement |
 | **MacPorts** | the other macOS package manager | a Portfile PR; small audience next to Homebrew |
-| **openSUSE (OBS)** | the Open Build Service can build rpm *and* deb for a dozen distros from one spec | an OBS account; effectively a second CI to look after |
+| **openSUSE (OBS)** | the Open Build Service can build rpm *and* deb for a dozen distros from one recipe | an OBS account; effectively a second CI to look after |
 | **Void, Gentoo, Guix** | thorough, opinionated distros whose users notice | one template/ebuild/definition each, and each has its own review culture |
 | **asdf / mise** | version managers some developers live in | needs a plugin repo of its own |
 
