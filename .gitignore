@@ -2,3 +2,17 @@
 tmp/
 .devbox/
 /result
+
+node_modules/
+.turbo/
+dist/
+coverage/
+
+# WXT build output and generated types.
+.output/
+.wxt/
+
+# Playwright.
+playwright-report/
+test-results/
+/playwright/.cache/
