@@ -1,136 +1,114 @@
 # Releasing nopass
 
-How to ship a new version, end to end.
+Releasing is a tag push. CI does the rest.
 
-crates.io, the prebuilt binaries, the `.deb`s, the nix flake and the Homebrew
-tap are live. What each channel costs and what is only written down is in
-[packaging/README.md](packaging/README.md).
+nopass ships through four channels — cargo, npm, nix and Homebrew. What each
+one costs is in [packaging/README.md](packaging/README.md).
 
-## 1. Cut the release
+## Cut the release
 
 ```sh
 # bump the version (workspace-wide, both crates inherit it)
-#   Cargo.toml -> [workspace.package] version = "0.2.1"
-#   crates/nopass-cli/Cargo.toml -> nopass-core = { version = "0.2.1", ... }
+#   Cargo.toml -> [workspace.package] version = "0.2.2"
+#   crates/nopass-cli/Cargo.toml -> nopass-core = { version = "0.2.2", ... }
 cargo build            # refreshes Cargo.lock
 cargo test --workspace && cargo clippy --workspace --all-targets
 
 git add Cargo.toml Cargo.lock
-git commit -m "Release v0.2.1"
-git tag v0.2.1
-git push origin main --tags
+git commit -m "Release v0.2.2"
+git push origin main
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
-The tag push starts [`release.yml`](.github/workflows/release.yml), which
-tests and builds four targets, builds both `.deb`s, creates the release if
-the tag beat it there, and uploads everything with a `checksums.txt`. To
-fill in a release that already exists:
+Push the commit to `main` **before** the tag. Both workflows start with a
+`guard` job that refuses a tag which is not an ancestor of `origin/main`, so
+a tag that got there first fails the guard and publishes nothing.
+
+## What happens then
+
+[`release.yml`](.github/workflows/release.yml) tests and builds four targets,
+creates the release if the tag push beat it there, and attaches the binaries
+with a `checksums.txt`.
+
+[`publish.yml`](.github/workflows/publish.yml) publishes both crates to
+crates.io in dependency order, waits for those binaries and then publishes
+`nopass-cli` to npm, and rewrites the Homebrew formula with the new tarball
+checksum and pushes it to the tap.
+
+Both are idempotent: an already-published version is skipped, not retried.
+Watch them with:
 
 ```sh
-gh workflow run release.yml -f tag=v0.2.1
-gh run watch                              # ~10 minutes
+gh run watch                                # ~10 minutes
 ```
 
-If the workflow cannot run, create the release by hand — `nopass update`
-looks for it:
+To fill in a release that already exists, or to re-run a channel that was
+missing its secret at the time:
 
 ```sh
-gh release create v0.2.1 --title "v0.2.1" --generate-notes
+gh workflow run release.yml -f tag=v0.2.2
+gh workflow run publish.yml -f tag=v0.2.2
 ```
 
-## 2. Publish on crates.io
+## The one thing CI cannot do
 
-Dependency order matters: `nopass-cli` depends on `nopass-core`, and
-crates.io will not accept the dependent until the dependency is indexed.
+`packaging/nix/nopass-release.nix` — the file the nixpkgs package is copied
+from — carries two hashes that only a nix build can compute:
 
-```sh
-cargo publish --package nopass-core
-cargo publish --package nopass-cli
-```
-
-Credentials live in `~/.cargo/credentials.toml`. This is what makes both
-`cargo install nopass-cli` and `cargo binstall nopass-cli` work.
-
-## 3. Publish on Homebrew (your own tap)
-
-One-time setup: create a repo named `homebrew-tap` under your GitHub
-account, with a `Formula/` directory. Copy
-[`packaging/homebrew/nopass.rb`](packaging/homebrew/nopass.rb) into it as
-`Formula/nopass.rb`.
-
-For every release, update two lines in the formula:
-
-```sh
-# get the new tarball checksum
-curl -fsSL https://github.com/souravsspace/nopass/archive/refs/tags/v0.2.1.tar.gz | shasum -a 256
-```
-
-- `url` — point at the new tag's tarball
-- `sha256` — the checksum you just computed
-
-Commit and push the tap. Verify locally:
-
-```sh
-brew install --build-from-source souravsspace/tap/nopass
-nopass --version
-```
-
-Users then install with:
-
-```sh
-brew tap souravsspace/tap
-brew install nopass
-```
-
-## 4. The other channels
-
-The files under [`packaging/`](packaging/) all carry the version, so bump
-each one the same way — the checksums differ per channel:
-
-| File | What to change |
+| Field | What it covers |
 |---|---|
-| `packaging/aur/PKGBUILD`, `aur/.SRCINFO` | `pkgver`, tarball `sha256sums`; the `.SRCINFO` is generated with `makepkg --printsrcinfo` |
-| `packaging/nix/nopass-release.nix` | `version`, `src.hash`, `cargoHash` |
+| `src.hash` | the unpacked source tree |
+| `cargoHash` | the vendored dependencies; changes with `Cargo.lock` |
 
-The two nix hashes are **not** the tarball checksum — `fetchFromGitHub`
-hashes the unpacked tree, and `cargoHash` covers the vendored dependencies.
-Get both by setting them to `lib.fakeHash`, building, and copying the value
-the mismatch error prints:
+Neither is the tarball checksum, because `fetchFromGitHub` hashes the
+unpacked tree. Get both by setting them to `lib.fakeHash`, building, and
+copying the value the mismatch error prints:
 
 ```sh
 nix build --impure --expr '(builtins.getFlake "git+file://'$PWD'?dirty=1").inputs.nixpkgs.legacyPackages.aarch64-darwin.callPackage '$PWD'/packaging/nix/nopass-release.nix {}'
 ```
 
-`packaging/nix/nopass.nix` — the one the flake uses — builds from the
-working tree and needs no hashes, so it follows the default branch on its
-own.
+That build also runs all 162 tests in the sandbox, so it is worth doing even
+when the hashes have not changed.
 
-Publishing to the AUR and nixpkgs each needs an account
-somewhere; the per-channel instructions are in
-[packaging/README.md](packaging/README.md).
+`packaging/nix/nopass.nix` — the one the flake uses — builds from the working
+tree and needs no hashes, so `nix profile install github:souravsspace/nopass`
+follows `main` on its own.
 
-## 5. How users update
+## Secrets the workflows need
+
+A job whose secret is missing is skipped, not failed. Set them once:
+
+```sh
+gh secret set CARGO_REGISTRY_TOKEN     # crates.io → Account Settings → API Tokens
+gh secret set NPM_TOKEN                # npmjs.com → Access Tokens → Granular
+gh secret set TAP_TOKEN                # GitHub PAT, contents:write on the tap repo
+```
+
+## How users update
 
 | Installed via | Update command |
 |---|---|
 | anything | `nopass update` (auto-detects brew vs cargo) |
 | Homebrew | `brew upgrade nopass` |
 | crates.io | `cargo install nopass-cli --force` |
-| cargo (git) | `cargo install --git https://github.com/souravsspace/nopass --tag v0.2.1 nopass-cli --force` |
+| npm | `npm install -g nopass-cli@latest` |
+| nix | `nix profile upgrade nopass` |
 
 `nopass update` queries the latest GitHub release, compares it with the
-running version, and runs the right installer. `nopass update --check`
-only reports whether an update exists.
+running version, and runs the right installer. `nopass update --check` only
+reports whether an update exists.
 
 ## Checklist
 
 - [ ] version bumped in `Cargo.toml` and the cli's `nopass-core` dependency,
       `Cargo.lock` refreshed (`cargo build`)
 - [ ] tests + clippy green
-- [ ] tag `vX.Y.Z` pushed
-- [ ] release workflow green; binaries, `.deb`s and `checksums.txt` attached
-- [ ] GitHub release exists (required for `nopass update`)
-- [ ] `cargo publish` — core, then cli
-- [ ] tap formula url + sha256 updated
-- [ ] `brew install --build-from-source souravsspace/tap/nopass` works
-- [ ] `packaging/` version bumps committed (aur, nix)
+- [ ] `packaging/nix/nopass-release.nix` version + both hashes bumped, and
+      the build above is green
+- [ ] commit on `main`, **then** the tag
+- [ ] both workflows green
+- [ ] release has four binaries and a `checksums.txt`
+- [ ] `cargo install nopass-cli`, `npm install -g nopass-cli` and
+      `brew upgrade nopass` all land on the new version
