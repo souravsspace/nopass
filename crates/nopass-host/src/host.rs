@@ -6,8 +6,8 @@ use serde_json::Value;
 use crate::entry;
 use crate::origin::{self, Candidate};
 use crate::proto::{
-    self, ErrorCode, LockState, Match, Request, Secret, StoreState, Success, Yes,
-    KNOWN_VERBS, MUTATING_VERBS, PROTOCOL_VERSION,
+    self, ErrorCode, LockState, Match, Request, Secret, StoreState, Success, Yes, KNOWN_VERBS,
+    MUTATING_VERBS, PROTOCOL_VERSION,
 };
 use crate::session::Session;
 
@@ -19,7 +19,10 @@ pub struct Host {
 impl Host {
     /// A host over `store`, unlocking through the default identity file.
     pub fn new(store: Store) -> Self {
-        Self { store, session: Session::default() }
+        Self {
+            store,
+            session: Session::default(),
+        }
     }
 
     pub fn with_session(store: Store, session: Session) -> Self {
@@ -68,7 +71,12 @@ impl Host {
 
             Request::Status { .. } => {
                 let (state, expires_in) = self.session.state();
-                proto::success(Success::Status { id, ok: Yes, state, expires_in })
+                proto::success(Success::Status {
+                    id,
+                    ok: Yes,
+                    state,
+                    expires_in,
+                })
             }
 
             Request::Unlock { passphrase, .. } => match self.session.unlock(&passphrase) {
@@ -83,11 +91,19 @@ impl Host {
 
             Request::Lock { .. } => {
                 self.session.lock();
-                proto::success(Success::Lock { id, ok: Yes, state: LockState::Locked })
+                proto::success(Success::Lock {
+                    id,
+                    ok: Yes,
+                    state: LockState::Locked,
+                })
             }
 
             Request::List { .. } => match self.store.list("") {
-                Ok(entries) => proto::success(Success::List { id, ok: Yes, entries }),
+                Ok(entries) => proto::success(Success::List {
+                    id,
+                    ok: Yes,
+                    entries,
+                }),
                 Err(error) => proto::failure(id, code_for(&error), error.to_string()),
             },
 
@@ -111,12 +127,16 @@ impl Host {
                 Err(error) => proto::failure(id, code_for(&error), error.to_string()),
             },
 
-            Request::Generate { length, symbols, .. } => {
-                match generate::password(length, &generate::charset(!symbols)) {
-                    Ok(password) => proto::success(Success::Generate { id, ok: Yes, password }),
-                    Err(error) => proto::failure(id, ErrorCode::Internal, error.to_string()),
-                }
-            }
+            Request::Generate {
+                length, symbols, ..
+            } => match generate::password(length, &generate::charset(!symbols)) {
+                Ok(password) => proto::success(Success::Generate {
+                    id,
+                    ok: Yes,
+                    password,
+                }),
+                Err(error) => proto::failure(id, ErrorCode::Internal, error.to_string()),
+            },
         }
     }
 
@@ -137,7 +157,11 @@ impl Host {
     /// a secret the way its password is.
     fn search(&self, id: u32, origin: &str) -> Value {
         let Some(page_host) = origin::host_of(origin) else {
-            return proto::success(Success::Search { id, ok: Yes, matches: Vec::new() });
+            return proto::success(Success::Search {
+                id,
+                ok: Yes,
+                matches: Vec::new(),
+            });
         };
 
         let names = match self.store.list("") {
@@ -148,7 +172,13 @@ impl Host {
         let matches = names
             .into_iter()
             .filter(|name| {
-                origin::matches(&Candidate { name: name.clone(), url: None }, &page_host)
+                origin::matches(
+                    &Candidate {
+                        name: name.clone(),
+                        url: None,
+                    },
+                    &page_host,
+                )
             })
             .map(|name| {
                 let fields = self
@@ -164,7 +194,11 @@ impl Host {
             })
             .collect();
 
-        proto::success(Success::Search { id, ok: Yes, matches })
+        proto::success(Success::Search {
+            id,
+            ok: Yes,
+            matches,
+        })
     }
 }
 
