@@ -22,18 +22,17 @@ ctap-hid-fido2 = { workspace = true, optional = true }
 
 [features]
 default = []
-# Touch ID (Secure Enclave) unlock slot on macOS. Requires a code-signed
-# build with keychain entitlements to function at runtime; the passphrase
-# slot works without it.
-touchid = ["dep:security-framework", "dep:security-framework-sys"]
 # FIDO2 security key (passkey) unlock slot, over USB HID. Off by default
 # because it pulls in a C HID stack (libudev on Linux); the passphrase slot
 # works without it.
 security-key = ["dep:ctap-hid-fido2"]
 
+# Touch ID (Secure Enclave) unlock slot. Always compiled on macOS; whether
+# it works at runtime depends on the binary being code-signed with keychain
+# entitlements — see packaging/macos.
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { version = "3", features = ["OSX_10_15"], optional = true }
-security-framework-sys = { version = "2", optional = true }
+security-framework = { version = "3", features = ["OSX_10_15"] }
+security-framework-sys = "2"
 
 [dev-dependencies]
 assert_cmd.workspace = true
