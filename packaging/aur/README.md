@@ -3,6 +3,19 @@
 Arch users install with `yay -S nopass` (or `paru`, or a plain
 `makepkg -si`) once this is pushed.
 
+## TODO: nopass is not on the AUR yet
+
+Nothing here has run. The account does not exist, the name is unclaimed, and
+`nopass` is not installable on Arch. Blocked on step 1 below:
+<https://aur.archlinux.org/register> was erroring as of 2026-08-08 — the site
+503s under load, so it is worth retrying rather than giving up.
+
+Once the account and key exist, do the [first push](#publishing) by hand —
+that is what creates the package — then add the private key as the
+`AUR_SSH_KEY` repository secret. From then on the `aur` job in
+[`publish.yml`](../../.github/workflows/publish.yml) updates it on every tag,
+and the rest of this file is background reading.
+
 ## One-time setup
 
 1. Make an account at <https://aur.archlinux.org/register>.
