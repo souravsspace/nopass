@@ -11,6 +11,7 @@ use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, U
 
 mod auth;
 mod fido2;
+mod setup;
 #[cfg(all(target_os = "macos", feature = "touchid"))]
 mod touchid;
 
@@ -46,12 +47,24 @@ enum Cmd {
         /// Overwrite an existing identity file
         #[arg(short, long)]
         force: bool,
+        /// Where to keep the private key (a file or a directory)
+        #[arg(long, value_name = "path")]
+        identity: Option<String>,
+        /// Leave the private key unprotected instead of asking for a passphrase
+        #[arg(long)]
+        no_passphrase: bool,
     },
     /// Initialize the store (generates a keypair first if you have none)
     Init {
         /// Subfolder to (re)initialize
         #[arg(short, long, default_value = "")]
         path: String,
+        /// Where to keep the private key (a file or a directory)
+        #[arg(long, value_name = "path")]
+        identity: Option<String>,
+        /// Leave the private key unprotected instead of asking for a passphrase
+        #[arg(long)]
+        no_passphrase: bool,
         /// Recipients (defaults to your own key from `nopass keygen`)
         recipients: Vec<String>,
     },
@@ -195,12 +208,27 @@ fn run() -> Result<()> {
 
     match cli.command {
         None => show_or_list(&store, cli.name.as_deref().unwrap_or(""), None),
-        Some(Cmd::Keygen { force }) => cmd_keygen(force),
+        Some(Cmd::Keygen {
+            force,
+            identity,
+            no_passphrase,
+        }) => cmd_keygen(force, identity.as_deref(), no_passphrase),
         Some(Cmd::Ls { subfolder }) => {
             show_or_list(&store, subfolder.as_deref().unwrap_or(""), None)
         }
         Some(Cmd::Show { clip, name }) => show_or_list(&store, name.as_deref().unwrap_or(""), clip),
-        Some(Cmd::Init { path, recipients }) => cmd_init(&store, &path, recipients),
+        Some(Cmd::Init {
+            path,
+            identity,
+            no_passphrase,
+            recipients,
+        }) => cmd_init(
+            &store,
+            &path,
+            recipients,
+            identity.as_deref(),
+            no_passphrase,
+        ),
         Some(Cmd::Find { terms }) => cmd_find(&store, &terms),
         Some(Cmd::Grep { pattern }) => cmd_grep(&store, &pattern),
         Some(Cmd::Insert {
@@ -330,11 +358,11 @@ fn cmd_update(check_only: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_keygen(force: bool) -> Result<()> {
-    let identity_file = crypto::default_identity_file();
+fn cmd_keygen(force: bool, identity: Option<&str>, no_passphrase: bool) -> Result<()> {
+    let identity_file = setup::target_path(identity)?;
     if identity_file.exists() && !force {
         let existing = crypto::identity_recipient(&identity_file)
-            .unwrap_or_else(|| "<unreadable>".to_string());
+            .unwrap_or_else(|| "<locked or unreadable>".to_string());
         bail!(
             "An identity already exists at {} (public key: {existing}).\n\
              Use --force to replace it. Replacing it makes entries encrypted\n\
@@ -342,9 +370,7 @@ fn cmd_keygen(force: bool) -> Result<()> {
             identity_file.display()
         );
     }
-    let public = crypto::generate_identity(&identity_file).map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("Generated new identity at {}", identity_file.display());
-    println!("Public key: {public}");
+    setup::create_identity(identity, no_passphrase)?;
     Ok(())
 }
 
@@ -417,6 +443,7 @@ fn cmd_passkey_enroll(
     };
 
     let locked = LockedIdentity {
+        public: crypto::public_from_secret(&secret),
         passphrase_slot,
         keychain_slot,
         fido2_slots,
@@ -648,7 +675,11 @@ fn write_identity_file(path: &std::path::Path, contents: &str) -> Result<()> {
 
 /// Recipients for init: explicit args win; otherwise use (creating if
 /// needed) this machine's own keypair.
-fn init_recipients(recipients: Vec<String>) -> Result<Vec<String>> {
+fn init_recipients(
+    recipients: Vec<String>,
+    identity: Option<&str>,
+    no_passphrase: bool,
+) -> Result<Vec<String>> {
     let recipients: Vec<String> = recipients.into_iter().filter(|r| !r.is_empty()).collect();
     if !recipients.is_empty() {
         return Ok(recipients);
@@ -656,18 +687,25 @@ fn init_recipients(recipients: Vec<String>) -> Result<Vec<String>> {
     if std::env::var("NOPASS_BACKEND").as_deref() == Ok("gpg") {
         bail!("Usage: nopass init <gpg-key-id>... (the gpg backend cannot generate keys for you)");
     }
-    let identity_file = crypto::default_identity_file();
+    let identity_file = setup::target_path(identity)?;
+    // An existing key is reused as-is — its public half is readable whether
+    // or not the secret is locked.
     if let Some(public) = crypto::identity_recipient(&identity_file) {
         return Ok(vec![public]);
     }
-    let public = crypto::generate_identity(&identity_file).map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("Generated new identity at {}", identity_file.display());
-    println!("Public key: {public}");
+    let (_, public) = setup::create_identity(identity, no_passphrase)?;
+    println!();
     Ok(vec![public])
 }
 
-fn cmd_init(store: &Store, path: &str, recipients: Vec<String>) -> Result<()> {
-    let recipients = init_recipients(recipients)?;
+fn cmd_init(
+    store: &Store,
+    path: &str,
+    recipients: Vec<String>,
+    identity: Option<&str>,
+    no_passphrase: bool,
+) -> Result<()> {
+    let recipients = init_recipients(recipients, identity, no_passphrase)?;
     store.init(&recipients, path)?;
     println!("Store initialized for {}", recipients.join(", "));
     Ok(())
@@ -889,14 +927,37 @@ fn yesno(question: &str) -> Result<bool> {
     Ok(matches!(response.trim(), "y" | "Y"))
 }
 
+/// Read one visible line. An answer is required, so end-of-input is an error
+/// rather than a silent default.
+fn prompt_line(prompt: &str) -> Result<String> {
+    eprint!("{prompt}");
+    std::io::stderr().flush().ok();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line)? == 0 {
+        bail!("Error: this needs an answer, but there is nothing on stdin to read.");
+    }
+    Ok(line.trim().to_string())
+}
+
 fn prompt_hidden(prompt: &str) -> Result<String> {
     eprint!("{prompt}");
-    let _ = Command::new("stty").arg("-echo").status();
+    std::io::stderr().flush().ok();
+    // Only worth turning echo off when there is a terminal echoing anything;
+    // otherwise stty just prints "stdin isn't a terminal" over the prompt.
+    let tty = std::io::stdin().is_terminal();
+    let echo = |on: &str| {
+        if tty {
+            let _ = Command::new("stty").arg(on).status();
+        }
+    };
+    echo("-echo");
     let mut line = String::new();
     let res = std::io::stdin().read_line(&mut line);
-    let _ = Command::new("stty").arg("echo").status();
+    echo("echo");
     eprintln!();
-    res?;
+    if res? == 0 {
+        bail!("Error: no passphrase given (stdin is empty).");
+    }
     Ok(line.trim_end_matches('\n').to_string())
 }
 
