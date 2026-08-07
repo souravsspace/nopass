@@ -17,6 +17,10 @@ use crate::error::{Error, Result};
 /// a locked identity from a plaintext one.
 pub const LOCK_HEADER: &str = "# nopass-locked v1";
 
+/// Comment line carrying the public recipient. A comment so that older
+/// builds, which know nothing of it, skip it like any other.
+const PUBLIC_KEY_COMMENT: &str = "# public key:";
+
 const SLOT_PASSPHRASE: &str = "slot-passphrase:";
 const SLOT_KEYCHAIN: &str = "slot-keychain:";
 const SLOT_FIDO2: &str = "slot-fido2:";
@@ -74,6 +78,10 @@ pub fn is_valid_label(label: &str) -> bool {
 /// A locked identity, holding the encrypted slots present on disk.
 #[derive(Debug, Default, Clone)]
 pub struct LockedIdentity {
+    /// The `age1...` recipient this identity decrypts for. Not secret, and
+    /// recorded in the clear so new entries can be encrypted — and the store
+    /// re-initialized — without unlocking anything.
+    pub public: Option<String>,
     /// age ciphertext of the identity under the user's passphrase.
     pub passphrase_slot: Option<Vec<u8>>,
     /// age ciphertext of the identity under a Keychain-held secret.
@@ -120,6 +128,10 @@ impl LockedIdentity {
         let mut locked = LockedIdentity::default();
         for line in contents.lines() {
             let line = line.trim();
+            if let Some(public) = line.strip_prefix(PUBLIC_KEY_COMMENT) {
+                locked.public = Some(public.trim().to_string());
+                continue;
+            }
             if line.is_empty() || line == LOCK_HEADER || line.starts_with('#') {
                 continue;
             }
@@ -144,6 +156,9 @@ impl LockedIdentity {
     pub fn serialize(&self) -> String {
         let mut out = format!("{LOCK_HEADER}\n");
         out.push_str("# Encrypted identity — unlock with passkey/passphrase.\n");
+        if let Some(public) = &self.public {
+            out.push_str(&format!("{PUBLIC_KEY_COMMENT} {public}\n"));
+        }
         if let Some(slot) = &self.passphrase_slot {
             out.push_str(&format!("{SLOT_PASSPHRASE} {}\n", b64().encode(slot)));
         }
@@ -328,6 +343,28 @@ mod tests {
         let parsed = LockedIdentity::parse(&text).unwrap();
         assert_eq!(parsed.passphrase_slot.as_deref(), Some(&b"abc"[..]));
         assert_eq!(parsed.keychain_slot.as_deref(), Some(&b"xyz"[..]));
+    }
+
+    #[test]
+    fn the_public_key_survives_a_round_trip_and_is_optional() {
+        let locked = LockedIdentity {
+            public: Some("age1example".into()),
+            passphrase_slot: Some(b"abc".to_vec()),
+            ..Default::default()
+        };
+        let text = locked.serialize();
+        assert!(text.contains("# public key: age1example"), "{text}");
+        assert_eq!(
+            LockedIdentity::parse(&text).unwrap().public.as_deref(),
+            Some("age1example")
+        );
+
+        // Files written before the comment existed simply have none.
+        let older = format!(
+            "{LOCK_HEADER}\nslot-passphrase: {}\n",
+            b64().encode(b"legacy")
+        );
+        assert_eq!(LockedIdentity::parse(&older).unwrap().public, None);
     }
 
     #[test]
