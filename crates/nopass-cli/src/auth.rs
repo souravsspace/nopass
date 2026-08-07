@@ -12,7 +12,7 @@ use nopass_core::lock::{
 };
 use nopass_core::{Error as CoreError, Result as CoreResult};
 
-use crate::agent;
+use nopass_core::agent;
 use crate::fido2;
 
 /// Set `NOPASS_UNLOCK=passphrase` to skip the hardware factor — useful when
