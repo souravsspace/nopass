@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    // TypeScript 7 removed `baseUrl`; paths resolve from this file's
+    // directory instead.
+    "paths": {
+      "@nopass/ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}
