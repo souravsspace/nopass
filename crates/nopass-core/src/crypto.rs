@@ -64,8 +64,8 @@ impl NativeCrypto {
         let contents = std::fs::read_to_string(&self.identity_file)
             .map_err(|_| Error::NoIdentity(self.identity_file.clone()))?;
 
-        // A locked identity must be unlocked (Touch ID / passphrase) before
-        // its secret key is usable.
+        // A locked identity must be unlocked (passphrase, security key)
+        // before its secret key is usable.
         if LockedIdentity::is_locked_file(&contents) {
             let mut cached = self.unlocked.lock().expect("unlock cache is not poisoned");
             if cached.is_none() {
@@ -454,7 +454,6 @@ mod tests {
             passphrase_slot: Some(
                 encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap(),
             ),
-            keychain_slot: None,
             ..Default::default()
         };
         std::fs::write(&id_file, locked.serialize()).unwrap();
@@ -603,7 +602,6 @@ mod tests {
             passphrase_slot: Some(
                 encrypt_slot(&secret, &SecretString::from("pw".to_owned())).unwrap(),
             ),
-            keychain_slot: None,
             ..Default::default()
         };
         std::fs::write(&id_file, locked.serialize()).unwrap();
