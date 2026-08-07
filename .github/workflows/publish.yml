@@ -3,9 +3,8 @@
 # its secret is missing, so this workflow is green from the first run and
 # starts publishing a channel the moment you add its credential.
 #
-# Alpine and nixpkgs are not here on purpose — both land through a human
-# review (an aports merge request, a nixpkgs pull request). See
-# packaging/README.md.
+# nixpkgs is not here on purpose: it lands through a pull request, and once
+# merged its own update bot handles later versions. See packaging/README.md.
 #
 # Runs when a v* tag is pushed, and only if that tag is on main.
 name: publish
