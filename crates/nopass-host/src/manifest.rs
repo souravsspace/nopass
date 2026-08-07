@@ -26,8 +26,13 @@ pub enum Browser {
 }
 
 impl Browser {
-    pub const ALL: &'static [Self] =
-        &[Self::Chrome, Self::Chromium, Self::Brave, Self::Edge, Self::Firefox];
+    pub const ALL: &'static [Self] = &[
+        Self::Chrome,
+        Self::Chromium,
+        Self::Brave,
+        Self::Edge,
+        Self::Firefox,
+    ];
 
     pub fn parse(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -94,7 +99,11 @@ pub fn body(browser: Browser, host_binary: &Path, extension: &str) -> Value {
         "type": "stdio",
     });
 
-    let key = if browser.is_gecko() { "allowed_extensions" } else { "allowed_origins" };
+    let key = if browser.is_gecko() {
+        "allowed_extensions"
+    } else {
+        "allowed_origins"
+    };
     let value = if browser.is_gecko() {
         json!([extension])
     } else {
@@ -114,8 +123,7 @@ pub fn install(
     let dir = browser
         .manifest_dir(home)
         .with_context(|| format!("{} is not supported on this platform", browser.name()))?;
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("could not create {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
 
     let file = dir.join(format!("{HOST_NAME}.json"));
     let text = serde_json::to_string_pretty(&body(browser, host_binary, extension))?;
@@ -149,28 +157,43 @@ mod tests {
         assert_eq!(manifest["name"], HOST_NAME);
         assert_eq!(manifest["type"], "stdio");
         assert_eq!(manifest["path"], "/usr/bin/nopass-host");
-        assert_eq!(manifest["allowed_origins"], json!(["chrome-extension://abcdef/"]));
+        assert_eq!(
+            manifest["allowed_origins"],
+            json!(["chrome-extension://abcdef/"])
+        );
         assert!(manifest.get("allowed_extensions").is_none());
     }
 
     #[test]
     fn a_firefox_manifest_pins_an_add_on_id() {
-        let manifest =
-            body(Browser::Firefox, Path::new("/usr/bin/nopass-host"), "nopass@example.org");
+        let manifest = body(
+            Browser::Firefox,
+            Path::new("/usr/bin/nopass-host"),
+            "nopass@example.org",
+        );
 
-        assert_eq!(manifest["allowed_extensions"], json!(["nopass@example.org"]));
+        assert_eq!(
+            manifest["allowed_extensions"],
+            json!(["nopass@example.org"])
+        );
         assert!(manifest.get("allowed_origins").is_none());
     }
 
     #[test]
     fn every_browser_has_its_own_directory() {
         let home = Path::new("/home/sana");
-        let dirs: Vec<_> =
-            Browser::ALL.iter().filter_map(|b| b.manifest_dir(home)).collect();
+        let dirs: Vec<_> = Browser::ALL
+            .iter()
+            .filter_map(|b| b.manifest_dir(home))
+            .collect();
 
         assert_eq!(dirs.len(), Browser::ALL.len(), "this platform is supported");
         let unique: std::collections::HashSet<_> = dirs.iter().collect();
-        assert_eq!(unique.len(), dirs.len(), "two browsers share a directory: {dirs:?}");
+        assert_eq!(
+            unique.len(),
+            dirs.len(),
+            "two browsers share a directory: {dirs:?}"
+        );
         assert!(dirs.iter().all(|d| d.starts_with(home)));
     }
 
@@ -192,9 +215,15 @@ mod tests {
 
         let parsed: Value =
             serde_json::from_str(&std::fs::read_to_string(&written).unwrap()).unwrap();
-        assert_eq!(parsed["allowed_origins"], json!(["chrome-extension://abcdef/"]));
+        assert_eq!(
+            parsed["allowed_origins"],
+            json!(["chrome-extension://abcdef/"])
+        );
 
-        assert_eq!(uninstall(Browser::Chrome, home.path()).unwrap(), Some(written.clone()));
+        assert_eq!(
+            uninstall(Browser::Chrome, home.path()).unwrap(),
+            Some(written.clone())
+        );
         assert!(!written.exists());
         assert_eq!(uninstall(Browser::Chrome, home.path()).unwrap(), None);
     }
