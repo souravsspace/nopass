@@ -6,7 +6,8 @@
   "exports": {
     "./lib/*": "./lib/*.ts",
     "./components/*": "./components/*.tsx",
-    "./entrypoints/*": "./entrypoints/*"
+    "./entrypoints/*": "./entrypoints/*",
+    "./wxt-shared": "./wxt.shared.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -26,7 +27,10 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "@tailwindcss/vite": "4.3.3",
+    "tailwindcss": "4.3.3",
+    "wxt": "0.21.3"
   },
   "peerDependencies": {
     "react": "^19",
