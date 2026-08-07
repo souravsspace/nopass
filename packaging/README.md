@@ -3,6 +3,11 @@
 Every way nopass can reach a user, what each one costs to run, and what is
 already live. Per-release steps are in [RELEASING.md](../RELEASING.md).
 
+nopass ships through four channels and no more: **cargo, npm, nix and
+Homebrew**. Debian, the AUR and Fedora were written and then dropped — each
+one wanted an account, a review queue or a second set of checksums to keep in
+step, for an audience the four above already reach.
+
 nopass is a **Unix program**: it uses unix sockets for the passphrase agent,
 `stty` for hidden prompts, and `/dev/shm` when it is there. Linux and macOS
 only — see [Windows](#windows) at the bottom.
@@ -11,45 +16,41 @@ only — see [Windows](#windows) at the bottom.
 
 | Channel | Users install with | Per release |
 |---|---|---|
-| **crates.io** | `cargo install nopass-cli` | `cargo publish` — core first, then cli |
-| **Prebuilt binaries** | download from the release, or `cargo binstall nopass-cli` | nothing; [`release.yml`](../.github/workflows/release.yml) builds them when the tag lands |
-| **Debian / Ubuntu** | `apt install ./nopass-cli_0.2.1-1_amd64.deb` from the release | nothing; the same workflow attaches both `.deb`s |
+| **crates.io** | `cargo install nopass-cli` | nothing; the `crates` job publishes core then cli |
+| **npm** | `npm install -g nopass-cli` | nothing; the `npm` job publishes [`npm/`](npm/) |
 | **Nix / NixOS** | `nix profile install github:souravsspace/nopass` | nothing; the flake follows the default branch |
-| **Homebrew tap** | `brew tap souravsspace/tap && brew install nopass` | bump `url` + `sha256` in [`homebrew/nopass.rb`](homebrew/nopass.rb), push the tap |
+| **Homebrew tap** | `brew tap souravsspace/tap && brew install nopass` | nothing; the `homebrew` job rewrites the formula and pushes the tap |
+| **Prebuilt binaries** | download from the release, or `cargo binstall nopass-cli` | nothing; [`release.yml`](../.github/workflows/release.yml) builds them when the tag lands |
 | **cargo (git)** | `cargo install --git https://github.com/souravsspace/nopass nopass-cli` | nothing; the tag is enough |
-| **GitHub release** | download the source tarball | `gh release create` |
 
 ## What a tag triggers
 
-Pushing a `v*` tag starts two workflows, and both refuse a tag that is not
-an ancestor of `main`:
+Pushing a `v*` tag starts two workflows. Both begin with a `guard` job that
+refuses a tag which is not an ancestor of `main`, and every other job waits
+on it — so a tag on a side branch publishes nothing, anywhere.
 
 - [`release.yml`](../.github/workflows/release.yml) — tests and builds four
-  targets, builds both `.deb`s, and attaches them to the release with a
-  `checksums.txt`.
+  targets, attaches them to the release with a `checksums.txt`, creating the
+  release if the tag push beat it there.
 - [`publish.yml`](../.github/workflows/publish.yml) — pushes the version out
-  to every channel that can be automated. Each job is skipped when its
-  secret is missing, so the workflow stays green until you add one.
+  to crates.io, npm and the tap. Each job is skipped when its secret is
+  missing, so the workflow stays green until you add one.
 
 | Job | Repository secret | How to get it |
 |---|---|---|
-| crates.io | `CARGO_REGISTRY_TOKEN` | `cargo login` prints it, or crates.io → Account Settings → API Tokens |
+| crates.io | `CARGO_REGISTRY_TOKEN` | crates.io → Account Settings → API Tokens |
+| npm | `NPM_TOKEN` | npmjs.com → Access Tokens → Granular, write access to `nopass-cli` |
 | homebrew tap | `TAP_TOKEN` | a GitHub PAT with `contents: write` on `souravsspace/homebrew-tap` |
-| aur | `AUR_SSH_KEY` | the private half of the SSH key registered on your AUR account |
 
-The AUR job reads `packaging/aur/*` **at the tag**, so bump those files
-before tagging. It also needs the package to exist on the AUR already —
-see [aur/README.md](aur/README.md), which is still a TODO.
+The npm job waits for `release.yml` to attach the binaries before publishing:
+the package downloads one on install, so shipping it early would ship
+something that cannot install.
 
 ## Written, not published yet
 
-Definitions are in this directory and build today. Publishing each one needs
-an account or a merge request somewhere.
-
 | Channel | Files | Users install with | What publishing needs |
 |---|---|---|---|
-| **nixpkgs** (upstream) | [`nix/nopass-release.nix`](nix/nopass-release.nix) | `nix-env -iA nixpkgs.nopass` | a PR to NixOS/nixpkgs, and a `cargoHash` bump per release |
-| **AUR** (Arch) | [`aur/PKGBUILD`](aur/PKGBUILD), [`aur/.SRCINFO`](aur/.SRCINFO) | `yay -S nopass` | an AUR account with an SSH key; push to `aur@aur.archlinux.org:nopass.git` |
+| **nixpkgs** (upstream) | [`nix/nopass-release.nix`](nix/nopass-release.nix) | `nix-env -iA nixpkgs.nopass` | [PR #550299](https://github.com/NixOS/nixpkgs/pull/550299) to be merged; after that their update bot handles versions |
 
 ## Worth considering, nothing written
 
@@ -57,8 +58,6 @@ an account or a merge request somewhere.
 |---|---|---|
 | **homebrew-core** | `brew install nopass`, no tap | Homebrew's notability bar: ~30 forks / 30 watchers / 75 stars, or a maintainer's judgement |
 | **MacPorts** | the other macOS package manager | a Portfile PR; small audience next to Homebrew |
-| **openSUSE (OBS)** | the Open Build Service can build rpm *and* deb for a dozen distros from one recipe | an OBS account; effectively a second CI to look after |
-| **Void, Gentoo, Guix** | thorough, opinionated distros whose users notice | one template/ebuild/definition each, and each has its own review culture |
 | **asdf / mise** | version managers some developers live in | needs a plugin repo of its own |
 
 ## Not recommended
