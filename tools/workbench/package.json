@@ -1,0 +1,33 @@
+{
+  "name": "@nopass/workbench",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "check-types": "tsc --noEmit",
+    "dev": "vite",
+    "e2e": "playwright test",
+    "lint": "biome check .",
+    "preview": "vite preview --port 4173 --host 127.0.0.1",
+    "test": "echo 'the workbench is covered by e2e' && exit 0"
+  },
+  "dependencies": {
+    "@nopass/extension": "workspace:*",
+    "@nopass/protocol": "workspace:*",
+    "@nopass/ui": "workspace:*",
+    "lucide-react": "1.30.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.2.1"
+  }
+}
