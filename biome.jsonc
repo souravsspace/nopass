@@ -22,5 +22,13 @@
       "!target",
       "!result"
     ]
-  }
+  },
+  "overrides": [
+    {
+      // A package's public entry point is a barrel on purpose. The rule is
+      // aimed at accidental ones inside a package.
+      "includes": ["packages/*/src/index.ts"],
+      "linter": { "rules": { "performance": { "noBarrelFile": "off" } } }
+    }
+  ]
 }
