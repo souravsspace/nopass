@@ -6,8 +6,8 @@ in step with the crate by hand:
 
 ```sh
 cargo install cargo-deb
-packaging/debian/build-deb.sh          # → target/debian/nopass_0.2.1_arm64.deb
-sudo apt install ./target/debian/nopass_*.deb
+packaging/debian/build-deb.sh          # → target/debian/nopass-cli_0.2.1-1_arm64.deb
+sudo apt install ./target/debian/nopass-cli_*.deb
 ```
 
 ## Optional: pin the metadata
