@@ -1827,12 +1827,14 @@ fn editing_keeps_the_plaintext_private_and_cleans_up_after_a_failed_editor() {
     // An "editor" that reports what it was handed, then fails.
     let report = machine.dir.path().join("report");
     let editor = machine.dir.path().join("nosy-editor");
+    // `ls -l` rather than `stat`, whose flags mean different things on BSD
+    // and GNU: -f asks one for a mode and the other for filesystem stats.
     std::fs::write(
         &editor,
         format!(
             "#!/bin/sh\n\
-             {{ stat -f '%Lp' \"$1\" || stat -c '%a' \"$1\"; }} > {r} 2>/dev/null\n\
-             {{ stat -f '%Lp' \"$(dirname \"$1\")\" || stat -c '%a' \"$(dirname \"$1\")\"; }} >> {r} 2>/dev/null\n\
+             ls -ld \"$1\" | cut -c1-10 > {r}\n\
+             ls -ld \"$(dirname \"$1\")\" | cut -c1-10 >> {r}\n\
              printf '%s\\n' \"$1\" >> {r}\n\
              exit 1\n",
             r = report.display()
@@ -1853,10 +1855,14 @@ fn editing_keeps_the_plaintext_private_and_cleans_up_after_a_failed_editor() {
     let mut lines = report.lines();
     assert_eq!(
         lines.next(),
-        Some("600"),
+        Some("-rw-------"),
         "plaintext must be private\n{report}"
     );
-    assert_eq!(lines.next(), Some("700"), "its directory too\n{report}");
+    assert_eq!(
+        lines.next(),
+        Some("drwx------"),
+        "its directory too\n{report}"
+    );
     let plaintext = lines.next().expect("the editor reports the path");
     assert!(
         !std::path::Path::new(plaintext).exists(),
