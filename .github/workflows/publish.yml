@@ -58,8 +58,11 @@ jobs:
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
           version="${tag#v}"
+          # crates.io answers 403 to a request without a descriptive
+          # User-Agent, which would look exactly like "not published yet".
+          ua="nopass-release (https://github.com/${{ github.repository }})"
           for crate in nopass-core nopass-cli; do
-            if curl -fsS -o /dev/null "https://crates.io/api/v1/crates/${crate}/${version}"; then
+            if curl -fsS -A "$ua" -o /dev/null "https://crates.io/api/v1/crates/${crate}/${version}"; then
               echo "${crate} ${version} is already published"
               continue
             fi
@@ -116,11 +119,23 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
+      # Publishing an old tag by hand reaches a commit from before the npm
+      # package existed. Nothing to do there, and it is not a failure.
+      - name: Is there an npm package at this tag?
+        id: pkg
+        run: |
+          if [ -d packaging/npm ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "packaging/npm does not exist at this tag — nothing to publish"
+          fi
+
       # The package is useless until release.yml has attached the binaries it
       # downloads, and that is a different workflow. Wait for them rather
       # than publish something that cannot install.
       - name: Wait for the release binaries
-        if: env.NPM_TOKEN != ''
+        if: env.NPM_TOKEN != '' && steps.pkg.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -141,7 +156,7 @@ jobs:
           exit 1
 
       - name: Publish
-        if: env.NPM_TOKEN != ''
+        if: env.NPM_TOKEN != '' && steps.pkg.outputs.present == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
