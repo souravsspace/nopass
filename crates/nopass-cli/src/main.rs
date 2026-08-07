@@ -12,7 +12,7 @@ use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, U
 mod auth;
 mod fido2;
 mod setup;
-#[cfg(all(target_os = "macos", feature = "touchid"))]
+#[cfg(target_os = "macos")]
 mod touchid;
 
 /// Build the crypto backend, attaching the interactive unlocker so locked
@@ -540,7 +540,7 @@ fn cmd_passkey_enroll(
     }
     let passphrase_slot = Some(encrypt_slot(&secret, &SecretString::from(passphrase))?);
 
-    // Optional Touch ID slot (macOS + touchid feature).
+    // Optional Touch ID slot (macOS only, and only on a signed build).
     let keychain_slot = enroll_touchid_slot(&secret, no_touchid);
 
     // Optional FIDO2 security key. Enrolled before anything is written, so a
@@ -707,7 +707,7 @@ fn short_id(credential_id: &[u8]) -> String {
         + "…"
 }
 
-#[cfg(all(target_os = "macos", feature = "touchid"))]
+#[cfg(target_os = "macos")]
 fn enroll_touchid_slot(secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
     if no_touchid {
         return None;
@@ -721,13 +721,10 @@ fn enroll_touchid_slot(secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
     }
 }
 
-#[cfg(not(all(target_os = "macos", feature = "touchid")))]
+#[cfg(not(target_os = "macos"))]
 fn enroll_touchid_slot(_secret: &str, no_touchid: bool) -> Option<Vec<u8>> {
     if !no_touchid {
-        eprintln!(
-            "Note: Touch ID support is not built in; skipping that slot. \
-             (Rebuild with --features touchid on macOS to enable it.)"
-        );
+        eprintln!("Note: Touch ID is a macOS feature; skipping that slot.");
     }
     None
 }
@@ -741,14 +738,14 @@ fn cmd_passkey_disable(identity_file: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(target_os = "macos", feature = "touchid"))]
+#[cfg(target_os = "macos")]
 fn remove_touchid_slot() {
     if let Err(e) = touchid::remove_key() {
         eprintln!("Note: could not remove the Touch ID key: {e}");
     }
 }
 
-#[cfg(not(all(target_os = "macos", feature = "touchid")))]
+#[cfg(not(target_os = "macos"))]
 fn remove_touchid_slot() {}
 
 fn cmd_passkey_status(identity_file: &std::path::Path) -> Result<()> {
