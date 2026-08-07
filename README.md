@@ -73,7 +73,7 @@ The first run asks you two things:
 ```
 Where should the private key live?
   [1] /home/you/.config/nopass/identity.txt   (default)
-  [2] a directory you choose
+  [2] a directory you choose (nopass makes a nopass/ folder in it)
 Choice [1]:
 
 Choose a master passphrase. nopass asks for it every time it reads
@@ -91,13 +91,17 @@ touches the disk in the clear.
 > **Back up the private key file somewhere safe.** Without it — or without
 > the passphrase — nobody can read your passwords, including you.
 
-Pick option 2 and nopass remembers the location in
-`~/.config/nopass/config`, so every later command finds it with no
-environment variables to set. You can also say it up front:
+Pick option 2 and name any directory — `~/Desktop`, a synced folder, an
+encrypted volume. nopass creates its own `nopass/` folder inside it (so you
+get `~/Desktop/nopass/identity.txt`, never a loose `identity.txt`) and
+remembers the location in `~/.config/nopass/config`, so every later command
+finds it with no environment variables to set.
+
+You can also say it up front:
 
 ```sh
-nopass init --identity ~/Vaults/keys        # a directory: keeps identity.txt inside
-nopass init --identity ~/Vaults/work.txt    # or an exact filename
+nopass init --identity ~/Vaults          # -> ~/Vaults/nopass/identity.txt
+nopass init --identity ~/Vaults/work.txt # an exact filename is taken literally
 ```
 
 Reading a password asks for the passphrase every time, like `pass` does.
@@ -268,6 +272,28 @@ nopass passkey enroll --security-key    # …plus a FIDO2 key, e.g. a YubiKey
 
 Running `enroll` on an already-locked identity asks to unlock it first, then
 re-locks it with the new passphrase — that is how you change it.
+
+### Forgot your master passphrase?
+
+Then the key is unrecoverable, and so is every password encrypted to it.
+There is no backdoor and no reset: the key file is sealed with your
+passphrase (scrypt + ChaCha20-Poly1305) and nopass holds nothing else that
+can open it. Changing a passphrase requires knowing the current one.
+
+Set up a way back **before** you need it. Any one of these is enough:
+
+- **Enroll a second factor.** `nopass passkey enroll --security-key` (or
+  Touch ID). Slots are independent — a security key you still have unlocks
+  the identity, and `nopass passkey enroll` then sets a new passphrase.
+- **Keep an offline copy of the unlocked key.** `nopass passkey disable`
+  writes the plaintext key back to the identity file; copy that file to a USB
+  stick or paper you keep somewhere safe, then re-lock with
+  `nopass passkey enroll`. Anyone holding that copy can read your store, so
+  treat it like a house key.
+- **Write the passphrase down** and keep it somewhere physical.
+
+Backing up the *locked* identity file protects you from a dead disk, not from
+a forgotten passphrase — the backup is sealed with the same passphrase.
 
 Every command that decrypts an entry (`show`, `grep`, `edit`, `generate -i`,
 `mv`, `cp`) prompts to unlock first; reading the identity file directly
