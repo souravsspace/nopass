@@ -1,0 +1,306 @@
+{
+  "comment": "The source of truth for the native messaging contract. Both packages/protocol (Zod) and crates/nopass-host (serde) are tested against this file, so neither can drift. Valid cases must round-trip: parse then re-serialise must deep-equal the original.",
+  "protocolVersion": 1,
+  "requests": [
+    {
+      "name": "hello announces the extension's protocol version",
+      "valid": true,
+      "json": { "id": 1, "verb": "hello", "version": 1 }
+    },
+    {
+      "name": "status asks whether the store is unlocked",
+      "valid": true,
+      "json": { "id": 2, "verb": "status" }
+    },
+    {
+      "name": "unlock carries the passphrase",
+      "valid": true,
+      "json": {
+        "id": 3,
+        "verb": "unlock",
+        "passphrase": "correct horse battery staple"
+      }
+    },
+    {
+      "name": "lock drops the cached identity",
+      "valid": true,
+      "json": { "id": 4, "verb": "lock" }
+    },
+    {
+      "name": "list asks for entry names",
+      "valid": true,
+      "json": { "id": 5, "verb": "list" }
+    },
+    {
+      "name": "search matches entries against a page origin",
+      "valid": true,
+      "json": { "id": 6, "verb": "search", "origin": "https://mail.google.com" }
+    },
+    {
+      "name": "get asks for one entry's secret",
+      "valid": true,
+      "json": { "id": 7, "verb": "get", "entry": "web/google.com" }
+    },
+    {
+      "name": "generate asks for a password it will not store",
+      "valid": true,
+      "json": { "id": 8, "verb": "generate", "length": 24, "symbols": true }
+    },
+    {
+      "name": "an unknown verb is rejected",
+      "valid": false,
+      "json": { "id": 9, "verb": "telepathy" }
+    },
+    {
+      "name": "insert is rejected: the host is read-only (ADR-0002)",
+      "valid": false,
+      "json": {
+        "id": 10,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "password": "hunter2"
+      }
+    },
+    {
+      "name": "edit is rejected: the host is read-only (ADR-0002)",
+      "valid": false,
+      "json": { "id": 11, "verb": "edit", "entry": "web/example.com" }
+    },
+    {
+      "name": "rm is rejected: the host is read-only (ADR-0002)",
+      "valid": false,
+      "json": { "id": 12, "verb": "rm", "entry": "web/example.com" }
+    },
+    {
+      "name": "mv is rejected: the host is read-only (ADR-0002)",
+      "valid": false,
+      "json": { "id": 13, "verb": "mv", "from": "a", "to": "b" }
+    },
+    {
+      "name": "cp is rejected: the host is read-only (ADR-0002)",
+      "valid": false,
+      "json": { "id": 14, "verb": "cp", "from": "a", "to": "b" }
+    },
+    {
+      "name": "a request without an id is rejected",
+      "valid": false,
+      "json": { "verb": "status" }
+    },
+    {
+      "name": "a negative id is rejected",
+      "valid": false,
+      "json": { "id": -1, "verb": "status" }
+    },
+    {
+      "name": "unlock without a passphrase is rejected",
+      "valid": false,
+      "json": { "id": 15, "verb": "unlock" }
+    },
+    {
+      "name": "search without an origin is rejected",
+      "valid": false,
+      "json": { "id": 16, "verb": "search" }
+    },
+    {
+      "name": "get with an empty entry name is rejected",
+      "valid": false,
+      "json": { "id": 17, "verb": "get", "entry": "" }
+    },
+    {
+      "name": "generate below the minimum length is rejected",
+      "valid": false,
+      "json": { "id": 18, "verb": "generate", "length": 3, "symbols": false }
+    },
+    {
+      "name": "generate above the maximum length is rejected",
+      "valid": false,
+      "json": { "id": 19, "verb": "generate", "length": 1025, "symbols": false }
+    }
+  ],
+  "responses": [
+    {
+      "name": "hello replies with the version and store state",
+      "valid": true,
+      "json": {
+        "id": 1,
+        "ok": true,
+        "verb": "hello",
+        "version": 1,
+        "store": "ready"
+      }
+    },
+    {
+      "name": "hello reports a store that was never initialised",
+      "valid": true,
+      "json": {
+        "id": 1,
+        "ok": true,
+        "verb": "hello",
+        "version": 1,
+        "store": "missing"
+      }
+    },
+    {
+      "name": "status reports a locked store",
+      "valid": true,
+      "json": {
+        "id": 2,
+        "ok": true,
+        "verb": "status",
+        "state": "locked",
+        "expiresIn": 0
+      }
+    },
+    {
+      "name": "status reports an unlocked store with time left",
+      "valid": true,
+      "json": {
+        "id": 2,
+        "ok": true,
+        "verb": "status",
+        "state": "unlocked",
+        "expiresIn": 275
+      }
+    },
+    {
+      "name": "unlock succeeds",
+      "valid": true,
+      "json": {
+        "id": 3,
+        "ok": true,
+        "verb": "unlock",
+        "state": "unlocked",
+        "expiresIn": 300
+      }
+    },
+    {
+      "name": "lock succeeds",
+      "valid": true,
+      "json": { "id": 4, "ok": true, "verb": "lock", "state": "locked" }
+    },
+    {
+      "name": "list returns names only, never secrets",
+      "valid": true,
+      "json": {
+        "id": 5,
+        "ok": true,
+        "verb": "list",
+        "entries": ["web/github.com", "web/google.com", "mail/fastmail"]
+      }
+    },
+    {
+      "name": "search returns matches with the fields needed to render a row",
+      "valid": true,
+      "json": {
+        "id": 6,
+        "ok": true,
+        "verb": "search",
+        "matches": [
+          {
+            "name": "web/google.com",
+            "username": "sana@example.com",
+            "url": "https://google.com"
+          },
+          { "name": "web/google.com-work" }
+        ]
+      }
+    },
+    {
+      "name": "get returns one entry's secret",
+      "valid": true,
+      "json": {
+        "id": 7,
+        "ok": true,
+        "verb": "get",
+        "entry": {
+          "name": "web/google.com",
+          "password": "hunter2",
+          "username": "sana@example.com",
+          "url": "https://google.com",
+          "totp": "otpauth://totp/google?secret=JBSWY3DPEHPK3PXP"
+        }
+      }
+    },
+    {
+      "name": "get returns an entry that carries nothing but a password",
+      "valid": true,
+      "json": {
+        "id": 7,
+        "ok": true,
+        "verb": "get",
+        "entry": { "name": "web/minimal.example", "password": "hunter2" }
+      }
+    },
+    {
+      "name": "generate returns a password",
+      "valid": true,
+      "json": {
+        "id": 8,
+        "ok": true,
+        "verb": "generate",
+        "password": "aX7!qm2Ldp0Ze4Rv"
+      }
+    },
+    {
+      "name": "an error names a machine-readable code",
+      "valid": true,
+      "json": {
+        "id": 7,
+        "ok": false,
+        "error": { "code": "locked", "message": "the store is locked" }
+      }
+    },
+    {
+      "name": "a read-only refusal is its own code",
+      "valid": true,
+      "json": {
+        "id": 10,
+        "ok": false,
+        "error": {
+          "code": "read_only",
+          "message": "the host cannot modify the store"
+        }
+      }
+    },
+    {
+      "name": "a response without ok is rejected",
+      "valid": false,
+      "json": { "id": 2, "verb": "status", "state": "locked", "expiresIn": 0 }
+    },
+    {
+      "name": "an unknown error code is rejected",
+      "valid": false,
+      "json": {
+        "id": 7,
+        "ok": false,
+        "error": { "code": "sadness", "message": "oh no" }
+      }
+    },
+    {
+      "name": "an unknown store state is rejected",
+      "valid": false,
+      "json": {
+        "id": 1,
+        "ok": true,
+        "verb": "hello",
+        "version": 1,
+        "store": "perhaps"
+      }
+    },
+    {
+      "name": "a list entry that is not a string is rejected",
+      "valid": false,
+      "json": { "id": 5, "ok": true, "verb": "list", "entries": ["web/ok", 7] }
+    },
+    {
+      "name": "a get response without a password is rejected",
+      "valid": false,
+      "json": {
+        "id": 7,
+        "ok": true,
+        "verb": "get",
+        "entry": { "name": "web/google.com" }
+      }
+    }
+  ]
+}
