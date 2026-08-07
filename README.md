@@ -469,7 +469,16 @@ All optional, via environment variables:
 - The clipboard is cleared after `NOPASS_CLIP_TIME` seconds, but other apps
   may read the clipboard during that window.
 - `nopass edit` writes plaintext to a temp dir (`/dev/shm` ramdisk when
-  available) for the duration of the edit.
+  available) for the duration of the edit. The directory is created 0700 —
+  never adopted, so a planted one is an error rather than somewhere to leave
+  a password — the file is 0600, and both are removed however the command
+  ends, including when the editor fails.
+- Entry names are confined to the store: `..` and absolute paths are refused
+  everywhere, so no command can be aimed outside `NOPASS_DIR`.
+- With `NOPASS_BACKEND=gpg` the write prompt is gpg's, not nopass's: gpg-agent
+  decides how often you are asked. With `NOPASS_BACKEND=plain` there is no
+  key at all, so nothing is encrypted and nothing is authenticated — it warns
+  on every command and exists only for the test suite.
 - `keygen --force` orphans anything encrypted only to the old key. Add the
   new key as a recipient and re-init instead if you want a rotation:
   `nopass init age1newkey...` re-encrypts everything.
@@ -478,7 +487,7 @@ All optional, via environment variables:
 
 ```sh
 devbox shell                          # rust + git (+ gnupg for gpg backend)
-cargo test --workspace                # 150 tests, fully hermetic
+cargo test --workspace                # 162 tests, fully hermetic
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
