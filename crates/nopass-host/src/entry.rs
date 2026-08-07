@@ -98,7 +98,10 @@ mod tests {
 
     #[test]
     fn a_url_value_keeps_the_colon_in_its_scheme() {
-        assert_eq!(parse("pw\nurl: https://a.b/c\n").url.as_deref(), Some("https://a.b/c"));
+        assert_eq!(
+            parse("pw\nurl: https://a.b/c\n").url.as_deref(),
+            Some("https://a.b/c")
+        );
     }
 
     #[test]
@@ -110,7 +113,10 @@ mod tests {
 
     #[test]
     fn the_first_occurrence_wins() {
-        assert_eq!(parse("pw\nuser: first\nuser: second\n").username.as_deref(), Some("first"));
+        assert_eq!(
+            parse("pw\nuser: first\nuser: second\n").username.as_deref(),
+            Some("first")
+        );
     }
 
     #[test]
