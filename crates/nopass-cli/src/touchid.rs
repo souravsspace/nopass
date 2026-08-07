@@ -6,11 +6,13 @@
 //! system only permits after a successful Touch ID prompt.
 //!
 //! Note: creating and using biometry-gated Secure Enclave keys requires the
-//! binary to be code-signed with keychain entitlements. An unsigned build
-//! (e.g. a plain `cargo install`) will fail at enrollment with a missing
-//! entitlement error; the passphrase slot remains available regardless.
+//! binary to be code-signed with keychain entitlements and an embedded
+//! provisioning profile — see `packaging/macos`. A build from source (plain
+//! `cargo install`, or Homebrew building the formula) cannot do it and fails
+//! at enrollment with `errSecMissingEntitlement`; the passphrase slot works
+//! regardless, so this is always a skipped slot rather than a hard failure.
 
-#![cfg(all(target_os = "macos", feature = "touchid"))]
+#![cfg(target_os = "macos")]
 
 use security_framework::access_control::{ProtectionMode, SecAccessControl};
 use security_framework::item::{
@@ -27,6 +29,9 @@ use nopass_core::{Error as CoreError, Result as CoreResult};
 const LABEL: &str = "nopass identity (Touch ID)";
 /// ECIES variant recommended by Apple for Secure Enclave EC keys.
 const ALG: Algorithm = Algorithm::ECIESEncryptionCofactorX963SHA256AESGCM;
+/// `errSecMissingEntitlement`: what an unsigned build gets back, and the one
+/// failure worth explaining in plain words.
+const ERR_SEC_MISSING_ENTITLEMENT: isize = -34018;
 
 fn auth_failed(msg: impl std::fmt::Display) -> CoreError {
     CoreError::AuthFailed(msg.to_string())
@@ -70,10 +75,15 @@ fn generate_key() -> CoreResult<SecKey> {
         .set_access_control(access);
 
     SecKey::new(&opts).map_err(|e| {
-        unavailable(format!(
-            "Secure Enclave key generation failed (the binary likely needs to be \
-             code-signed with keychain entitlements): {e}"
-        ))
+        if e.code() == ERR_SEC_MISSING_ENTITLEMENT {
+            unavailable(
+                "this build of nopass is not code-signed, so macOS refuses to create a \
+                 Secure Enclave key. Install the signed release to use Touch ID; a \
+                 passphrase or security key works with any build.",
+            )
+        } else {
+            unavailable(format!("Secure Enclave key generation failed: {e}"))
+        }
     })
 }
 
@@ -94,8 +104,8 @@ pub fn enroll_slot(identity_secret: &str) -> CoreResult<Vec<u8>> {
 
 /// Unlock a Touch ID slot, prompting Touch ID. Returns the identity secret.
 pub fn unlock_slot(ciphertext: &[u8]) -> CoreResult<String> {
-    let key = find_key()
-        .ok_or_else(|| unavailable("no Touch ID key is enrolled on this machine"))?;
+    let key =
+        find_key().ok_or_else(|| unavailable("no Touch ID key is enrolled on this machine"))?;
     let plain = key
         .decrypt_data(ALG, ciphertext)
         .map_err(|e| auth_failed(format!("Touch ID decryption failed: {e}")))?;
