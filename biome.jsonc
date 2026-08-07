@@ -1,0 +1,26 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  // Ultracite 7 ships one preset per framework; stack them.
+  "extends": [
+    "ultracite/biome/core",
+    "ultracite/biome/react",
+    "ultracite/biome/vitest"
+  ],
+  "files": {
+    "includes": [
+      // The release shim predates this config and is not part of the
+      // monorepo's TypeScript surface.
+      "!packaging",
+      "!**/node_modules",
+      "!**/.turbo",
+      "!**/.output",
+      "!**/.wxt",
+      "!**/dist",
+      "!**/coverage",
+      "!**/playwright-report",
+      "!**/test-results",
+      "!target",
+      "!result"
+    ]
+  }
+}
