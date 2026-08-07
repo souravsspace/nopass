@@ -25,21 +25,31 @@ straight into the CLI. No external key tooling required.
 
 ## Installation
 
-Requires [Rust](https://rustup.rs). Optionally `git` (for history/sync)
-and `gnupg` (only for the gpg backend).
+macOS and Linux, x86_64 and arm64. Pick whichever you already have — only
+the cargo route needs [Rust](https://rustup.rs); the rest ship a prebuilt
+binary. Optionally `git` (for history/sync) and `gnupg` (only for the gpg
+backend).
+
+```sh
+brew tap souravsspace/tap && brew install nopass   # Homebrew
+npm install -g nopass-cli                          # npm
+cargo install nopass-cli                           # cargo, builds from source
+nix profile install github:souravsspace/nopass     # nix
+```
+
+Or download a binary straight from the
+[latest release](https://github.com/souravsspace/nopass/releases/latest).
+
+```sh
+nopass --version
+```
+
+From a checkout:
 
 ```sh
 git clone https://github.com/souravsspace/nopass.git
 cd nopass
 cargo install --path crates/nopass-cli
-nopass --version
-```
-
-Or via Homebrew (once the tap is published):
-
-```sh
-brew tap souravsspace/tap
-brew install nopass
 ```
 
 Or for development, [devbox](https://www.jetify.com/devbox) provides the
