@@ -1,5 +1,5 @@
 # Pushes a tagged version out to the package channels that can be automated:
-# crates.io, the Homebrew tap, the AUR, and COPR. Each job is skipped when
+# crates.io, the Homebrew tap, and the AUR. Each job is skipped when
 # its secret is missing, so this workflow is green from the first run and
 # starts publishing a channel the moment you add its credential.
 #
@@ -142,33 +142,3 @@ jobs:
             git commit -am "Update to ${version}"
             git push
           }
-
-  copr:
-    name: copr
-    needs: guard
-    runs-on: ubuntu-latest
-    container: fedora:latest
-    env:
-      COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
-    steps:
-      # No checkout: COPR clones the tag itself. The spec it finds there is
-      # the one that ships, so bump packaging/rpm/nopass.spec before tagging.
-      - name: Build the rpm in COPR
-        if: env.COPR_CONFIG != ''
-        run: |
-          tag="${{ inputs.tag || github.ref_name }}"
-          dnf install -y copr-cli
-
-          mkdir -p ~/.config
-          printf '%s\n' "$COPR_CONFIG" > ~/.config/copr
-          chmod 600 ~/.config/copr
-
-          # --nowait: a build across every chroot outlives a sensible CI job.
-          # Watch it at copr.fedorainfracloud.org/coprs/souravsspace/nopass.
-          copr-cli buildscm --nowait \
-            --clone-url "https://github.com/${{ github.repository }}.git" \
-            --commit "$tag" \
-            --spec packaging/rpm/nopass.spec \
-            --type git \
-            --method rpkg \
-            souravsspace/nopass
