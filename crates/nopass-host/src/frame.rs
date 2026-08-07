@@ -24,7 +24,10 @@ fn fill(reader: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
     while filled < buf.len() {
         match reader.read(&mut buf[filled..])? {
             0 if filled == 0 => return Ok(false),
-            0 => bail!("the stream ended {filled} bytes into a {} byte read", buf.len()),
+            0 => bail!(
+                "the stream ended {filled} bytes into a {} byte read",
+                buf.len()
+            ),
             read => filled += read,
         }
     }
@@ -54,7 +57,10 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Option<Value>> {
 pub fn write_frame(writer: &mut impl Write, value: &impl Serialize) -> Result<()> {
     let body = serde_json::to_vec(value)?;
     if body.len() > MAX_FRAME_BYTES {
-        bail!("frame too large: {} bytes, cap is {MAX_FRAME_BYTES}", body.len());
+        bail!(
+            "frame too large: {} bytes, cap is {MAX_FRAME_BYTES}",
+            body.len()
+        );
     }
 
     writer.write_all(&(body.len() as u32).to_le_bytes())?;
