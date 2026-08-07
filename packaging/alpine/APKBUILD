@@ -1,0 +1,40 @@
+# Contributor: Sourav <souravsspace@gmail.com>
+# Maintainer: Sourav <souravsspace@gmail.com>
+#
+# Alpine package. Lands upstream through a merge request against
+# gitlab.alpinelinux.org/alpine/aports (testing/nopass) — see ../README.md.
+pkgname=nopass
+pkgver=0.2.0
+pkgrel=0
+pkgdesc="Fast, self-contained password manager"
+url="https://github.com/souravsspace/nopass"
+arch="all !s390x !riscv64"
+license="MIT"
+makedepends="cargo cargo-auditable"
+checkdepends="git"
+subpackages="$pkgname-doc"
+source="$pkgname-$pkgver.tar.gz::https://github.com/souravsspace/nopass/archive/refs/tags/v$pkgver.tar.gz"
+
+prepare() {
+	default_prepare
+	cargo fetch --target="$CTARGET" --locked
+}
+
+build() {
+	cargo auditable build --release --frozen --package nopass-cli
+}
+
+check() {
+	# Hermetic: no network, no real store, temp dirs throughout.
+	cargo test --frozen --workspace
+}
+
+package() {
+	install -Dm755 target/release/nopass -t "$pkgdir"/usr/bin/
+	install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+	install -Dm644 README.md -t "$pkgdir"/usr/share/doc/$pkgname/
+}
+
+sha512sums="
+ee8f54f000ee64f2c1b1d748f856749295d7a81e5b395f5b95e8672e16887179882bc630bda078e12f957bcd209efd0915099f40da3b89b90de876fc0d5a9ecc  nopass-0.2.0.tar.gz
+"
