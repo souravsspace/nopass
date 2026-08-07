@@ -1,9 +1,8 @@
 //! Authentication for locked identities. The passphrase slot is the real,
 //! cross-platform cryptographic lock; a FIDO2 security key (see
-//! [`crate::fido2`]) and, on macOS, a Secure Enclave / Touch ID slot (see
-//! [`crate::touchid`]) can be layered on top. Every slot recovers the same
-//! identity, so unlocking tries them cheapest-first and falls through to the
-//! passphrase whenever a factor is missing or refuses.
+//! [`crate::fido2`]) can be layered on top. Every slot recovers the same
+//! identity, so unlocking tries the key first and falls through to the
+//! passphrase whenever it is missing or refuses.
 
 use nopass_core::lock::{
     decrypt_slot, decrypt_slot_with_key, Fido2Slot, LockedIdentity, SecretString, Unlocker,
@@ -12,29 +11,16 @@ use nopass_core::{Error as CoreError, Result as CoreResult};
 
 use crate::fido2;
 
-/// Set `NOPASS_UNLOCK=passphrase` to skip the hardware factors — useful when
+/// Set `NOPASS_UNLOCK=passphrase` to skip the hardware factor — useful when
 /// a key is plugged in but you would rather just type.
 const FORCE_ENV: &str = "NOPASS_UNLOCK";
 
-/// Front-end unlocker: Touch ID, then any enrolled security key, then the
-/// passphrase.
+/// Front-end unlocker: any enrolled security key, then the passphrase.
 pub struct CliUnlocker;
 
 impl Unlocker for CliUnlocker {
     fn unlock(&self, locked: &LockedIdentity) -> CoreResult<String> {
         let passphrase_only = std::env::var(FORCE_ENV).as_deref() == Ok("passphrase");
-
-        #[cfg(target_os = "macos")]
-        if !passphrase_only {
-            if let Some(slot) = &locked.keychain_slot {
-                match crate::touchid::unlock_slot(slot) {
-                    Ok(secret) => return Ok(secret),
-                    Err(e) => {
-                        eprintln!("Touch ID unlock failed ({e}); trying the next factor.");
-                    }
-                }
-            }
-        }
 
         if !passphrase_only {
             if let Some(secret) = try_security_keys(locked) {
