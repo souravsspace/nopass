@@ -254,6 +254,45 @@ fn ls_renders_tree_without_extension() {
 }
 
 #[test]
+fn absolute_paths_are_refused() {
+    // Joining an absolute path onto the store root drops the root, so these
+    // would otherwise reach anywhere on the machine the user can write.
+    let store = TestStore::new();
+    let outside = store.dir.path().join("outside");
+    std::fs::create_dir_all(outside.join("keep")).unwrap();
+    let outside = outside.display().to_string();
+
+    for args in [
+        vec!["rm", "-rf", &outside],
+        vec!["show", &outside],
+        vec!["ls", &outside],
+        vec!["insert", "-e", &outside],
+        vec!["mv", "-f", "anything", &outside],
+        vec!["cp", "-f", "anything", &outside],
+    ] {
+        store
+            .cmd()
+            .args(&args)
+            .write_stdin("x\n")
+            .assert()
+            .failure();
+    }
+    assert!(std::path::Path::new(&outside).join("keep").is_dir());
+}
+
+#[test]
+fn clipping_line_zero_is_refused() {
+    let store = TestStore::new();
+    store.insert("cred", "hunter2");
+    store
+        .cmd()
+        .args(["show", "-c0", "cred"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("line 0"));
+}
+
+#[test]
 fn sneaky_paths_rejected() {
     let store = TestStore::new();
     store
@@ -354,7 +393,9 @@ impl NativeStore {
         let mut cmd = Command::cargo_bin("nopass").unwrap();
         cmd.env("NOPASS_DIR", self.dir.path().join("store"))
             .env("NOPASS_IDENTITY", self.dir.path().join("identity.txt"))
-            .env("NOPASS_AGENT_SOCK", self.dir.path().join("agent.sock"))
+            // A directory nopass has to make itself, so it can insist on
+            // one only the owner can reach.
+            .env("NOPASS_AGENT_SOCK", self.dir.path().join("run/agent.sock"))
             .env_remove("NOPASS_BACKEND")
             .env_remove("NOPASS_KEY")
             .env_remove("NOPASS_CACHE_TTL")
@@ -827,9 +868,26 @@ fn keys_can_be_removed_by_name() {
         .assert()
         .success();
 
+    // Dropping a slot is a change to the lock, so it has to be authorised
+    // like every other one. Nothing to answer with, nothing removed.
     store
         .cmd()
         .args(["passkey", "remove-key", "security-key"])
+        .write_stdin("")
+        .assert()
+        .failure();
+    store
+        .cmd_with_key("main")
+        .args(["show", "cred"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("top secret\n");
+
+    store
+        .cmd()
+        .args(["passkey", "remove-key", "security-key"])
+        .write_stdin("master-pass\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Removed security key"));
@@ -1096,7 +1154,9 @@ impl FreshMachine {
         let mut cmd = Command::cargo_bin("nopass").unwrap();
         cmd.env("HOME", self.home())
             .env("NOPASS_DIR", self.dir.path().join("store"))
-            .env("NOPASS_AGENT_SOCK", self.dir.path().join("agent.sock"))
+            // A directory nopass has to make itself, so it can insist on
+            // one only the owner can reach.
+            .env("NOPASS_AGENT_SOCK", self.dir.path().join("run/agent.sock"))
             .env_remove("NOPASS_IDENTITY")
             .env_remove("NOPASS_CONFIG")
             .env_remove("NOPASS_BACKEND")
@@ -1706,6 +1766,104 @@ fn a_trailing_slash_on_the_identity_flag_means_directory() {
         .stdout("hunter2\n");
 }
 
+#[test]
+fn changing_the_recipients_needs_the_passphrase() {
+    // Pointing the store at someone else's key is the most damaging write
+    // there is: everything saved afterwards would be encrypted to them.
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+    let id_file = machine.dir.path().join("store/.nopass-id");
+    let before = std::fs::read_to_string(&id_file).unwrap();
+
+    machine
+        .cmd()
+        .args([
+            "init",
+            "age1wy352ryh4jdf93fey3h7ye6cwl5fwj2d54t9jgagl2uwalh6s38sc7guwx",
+        ])
+        .write_stdin("")
+        .assert()
+        .failure();
+
+    assert_eq!(std::fs::read_to_string(&id_file).unwrap(), before);
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn moving_and_copying_without_the_passphrase_change_nothing() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+    let store = machine.dir.path().join("store");
+
+    for args in [
+        vec!["mv", "-f", "gmail", "moved"],
+        vec!["cp", "-f", "gmail", "copied"],
+    ] {
+        machine.cmd().args(&args).write_stdin("").assert().failure();
+    }
+
+    assert!(store.join("gmail.np").exists(), "the entry must stay put");
+    assert!(!store.join("moved.np").exists());
+    assert!(!store.join("copied.np").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn editing_keeps_the_plaintext_private_and_cleans_up_after_a_failed_editor() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+
+    // An "editor" that reports what it was handed, then fails.
+    let report = machine.dir.path().join("report");
+    let editor = machine.dir.path().join("nosy-editor");
+    std::fs::write(
+        &editor,
+        format!(
+            "#!/bin/sh\n\
+             {{ stat -f '%Lp' \"$1\" || stat -c '%a' \"$1\"; }} > {r} 2>/dev/null\n\
+             {{ stat -f '%Lp' \"$(dirname \"$1\")\" || stat -c '%a' \"$(dirname \"$1\")\"; }} >> {r} 2>/dev/null\n\
+             printf '%s\\n' \"$1\" >> {r}\n\
+             exit 1\n",
+            r = report.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    machine
+        .cmd()
+        .env("EDITOR", &editor)
+        .args(["edit", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .failure();
+
+    let report = std::fs::read_to_string(&report).unwrap();
+    let mut lines = report.lines();
+    assert_eq!(
+        lines.next(),
+        Some("600"),
+        "plaintext must be private\n{report}"
+    );
+    assert_eq!(lines.next(), Some("700"), "its directory too\n{report}");
+    let plaintext = lines.next().expect("the editor reports the path");
+    assert!(
+        !std::path::Path::new(plaintext).exists(),
+        "the decrypted entry was left behind at {plaintext}"
+    );
+}
+
 // ---- the passphrase cache ----
 
 #[cfg(unix)]
@@ -1861,6 +2019,39 @@ fn changing_the_passphrase_leaves_the_old_cache_behind() {
         .assert()
         .success()
         .stdout("hunter2\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_client_that_says_nothing_does_not_wedge_the_agent() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    // Somebody connects and then says nothing at all — a crashed client, or
+    // a stray `nc -U`. Everyone else must carry on.
+    let _mute = std::os::unix::net::UnixStream::connect(machine.dir.path().join("run/agent.sock"))
+        .expect("the agent is listening");
+
+    let started = std::time::Instant::now();
+    machine
+        .cmd_cached(60)
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "a silent client held everyone else up for {:?}",
+        started.elapsed()
+    );
 }
 
 #[cfg(unix)]
