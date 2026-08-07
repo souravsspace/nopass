@@ -13,7 +13,7 @@ only — see [Windows](#windows) at the bottom.
 |---|---|---|
 | **crates.io** | `cargo install nopass-cli` | `cargo publish` — core first, then cli |
 | **Prebuilt binaries** | download from the release, or `cargo binstall nopass-cli` | nothing; [`release.yml`](../.github/workflows/release.yml) builds them when the tag lands |
-| **Debian / Ubuntu** | `apt install ./nopass_0.2.1_amd64.deb` from the release | nothing; the same workflow attaches both `.deb`s |
+| **Debian / Ubuntu** | `apt install ./nopass-cli_0.2.1-1_amd64.deb` from the release | nothing; the same workflow attaches both `.deb`s |
 | **Nix / NixOS** | `nix profile install github:souravsspace/nopass` | nothing; the flake follows the default branch |
 | **Homebrew tap** | `brew tap souravsspace/tap && brew install nopass` | bump `url` + `sha256` in [`homebrew/nopass.rb`](homebrew/nopass.rb), push the tap |
 | **cargo (git)** | `cargo install --git https://github.com/souravsspace/nopass nopass-cli` | nothing; the tag is enough |
