@@ -4,7 +4,7 @@
 # regenerated .SRCINFO, to ssh://aur@aur.archlinux.org/nopass.git — see
 # ../README.md.
 pkgname=nopass
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="Fast, self-contained password manager"
 arch=('x86_64' 'aarch64')
@@ -17,7 +17,7 @@ optdepends=('git: history and sync for the store'
             'wl-clipboard: clipboard support on Wayland'
             'gnupg: the optional gpg backend')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('51cd64f81e1187f5ef776bf5cc7aaa1841d63bd555fbd03b5c60b304d4f77790')
+sha256sums=('35ab5dfc18f22cc255a71b8d0f678d4d3034768df6e0f32ca25c2be63b7dd491')
 
 prepare() {
   cd "$pkgname-$pkgver"
