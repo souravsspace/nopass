@@ -1,0 +1,30 @@
+{
+  "name": "nopass",
+  "version": "0.2.1",
+  "private": true,
+  "repository": "https://github.com/souravsspace/nopass",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "turbo run build //#build:rust",
+    "build:rust": "cargo build --workspace --release",
+    "check-types": "turbo run check-types",
+    "e2e": "turbo run e2e",
+    "format": "ultracite fix",
+    "lint": "turbo run lint //#lint:rust",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "test": "turbo run test //#test:rust",
+    "test:rust": "cargo test --workspace"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.7",
+    "turbo": "2.10.8",
+    "typescript": "7.0.2",
+    "ultracite": "7.10.1"
+  },
+  "packageManager": "bun@1.3.11"
+}
