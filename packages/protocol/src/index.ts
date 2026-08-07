@@ -1,0 +1,26 @@
+export {
+  createFrameDecoder,
+  encodeFrame,
+  type FrameDecoder,
+  MAX_FRAME_BYTES,
+} from "./framing";
+export {
+  type ErrorCode,
+  type ErrorResponse,
+  errorCodeSchema,
+  errorSchema,
+  MAX_PASSWORD_LENGTH,
+  type Match,
+  MIN_PASSWORD_LENGTH,
+  matchSchema,
+  PROTOCOL_VERSION,
+  type Request,
+  type Response,
+  type ResponseFor,
+  requestSchema,
+  responseSchema,
+  type Secret,
+  type SuccessResponse,
+  secretSchema,
+  type Verb,
+} from "./messages";
