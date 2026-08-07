@@ -23,6 +23,26 @@
       "!result"
     ]
   },
+  "linter": {
+    "rules": {
+      "complexity": {
+        // `void promise` is how this codebase marks a promise it means not to
+        // await. Banning it just moves the same thing into a floating call
+        // that reads like an oversight.
+        "noVoid": "off"
+      },
+      "style": {
+        // `i--` in a reverse scan and `id++` for a counter are clearer than
+        // the alternatives, and both are local to one function.
+        "noIncrementDecrement": "off"
+      },
+      "performance": {
+        // The popup is 360px wide and renders a handful of rows. Hoisting
+        // every handler out of JSX costs readability and buys nothing here.
+        "noJsxPropsBind": "off"
+      }
+    }
+  },
   "overrides": [
     {
       // A package's public entry point is a barrel on purpose. The rule is
