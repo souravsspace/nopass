@@ -1,0 +1,43 @@
+{
+  "name": "nopass-cli",
+  "version": "0.2.1",
+  "description": "Fast, self-contained password manager",
+  "keywords": [
+    "password",
+    "password-manager",
+    "age",
+    "encryption",
+    "cli"
+  ],
+  "homepage": "https://github.com/souravsspace/nopass",
+  "bugs": "https://github.com/souravsspace/nopass/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/souravsspace/nopass.git",
+    "directory": "packaging/npm"
+  },
+  "license": "MIT",
+  "author": "Sourav <souravsspace@gmail.com>",
+  "bin": {
+    "nopass": "bin/nopass"
+  },
+  "files": [
+    "bin/nopass",
+    "install.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
