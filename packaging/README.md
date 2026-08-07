@@ -11,6 +11,10 @@ only — see [Windows](#windows) at the bottom.
 
 | Channel | Users install with | Per release |
 |---|---|---|
+| **crates.io** | `cargo install nopass-cli` | `cargo publish` — core first, then cli |
+| **Prebuilt binaries** | download from the release, or `cargo binstall nopass-cli` | nothing; [`release.yml`](../.github/workflows/release.yml) builds them when the tag lands |
+| **Debian / Ubuntu** | `apt install ./nopass_0.2.1_amd64.deb` from the release | nothing; the same workflow attaches both `.deb`s |
+| **Nix / NixOS** | `nix profile install github:souravsspace/nopass` | nothing; the flake follows the default branch |
 | **Homebrew tap** | `brew tap souravsspace/tap && brew install nopass` | bump `url` + `sha256` in [`homebrew/nopass.rb`](homebrew/nopass.rb), push the tap |
 | **cargo (git)** | `cargo install --git https://github.com/souravsspace/nopass nopass-cli` | nothing; the tag is enough |
 | **GitHub release** | download the source tarball | `gh release create` |
@@ -22,19 +26,15 @@ an account or a merge request somewhere.
 
 | Channel | Files | Users install with | What publishing needs |
 |---|---|---|---|
-| **Nix / NixOS** | [`nix/nopass.nix`](nix/nopass.nix), [`../flake.nix`](../flake.nix) | `nix profile install github:souravsspace/nopass` | nothing — it works the moment the flake is on the default branch |
 | **nixpkgs** (upstream) | [`nix/nopass-release.nix`](nix/nopass-release.nix) | `nix-env -iA nixpkgs.nopass` | a PR to NixOS/nixpkgs, and a `cargoHash` bump per release |
 | **AUR** (Arch) | [`aur/PKGBUILD`](aur/PKGBUILD), [`aur/.SRCINFO`](aur/.SRCINFO) | `yay -S nopass` | an AUR account with an SSH key; push to `aur@aur.archlinux.org:nopass.git` |
 | **Alpine** | [`alpine/APKBUILD`](alpine/APKBUILD) | `apk add nopass` | a merge request to alpine/aports (testing/), then a maintainer promotes it |
 | **Fedora / RHEL** | [`rpm/nopass.spec`](rpm/nopass.spec) | `dnf copr enable souravsspace/nopass && dnf install nopass` | a Fedora account; COPR builds and hosts it for free |
-| **Debian / Ubuntu** | [`debian/`](debian/) | `apt install ./nopass_0.2.0_amd64.deb` | nothing, if the `.deb` rides along on the GitHub release |
 
 ## Worth considering, nothing written
 
 | Channel | Why you might | Why not yet |
 |---|---|---|
-| **crates.io** | `cargo install nopass-cli` with no `--git`; also unlocks `cargo binstall` | one `cargo publish` per crate, in dependency order; the name must be free |
-| **Prebuilt binaries** | most installs become a download instead of a five-minute Rust build; feeds Homebrew bottles and `cargo-binstall` | needs a release workflow cross-compiling four targets (linux gnu/musl × x86_64/aarch64, macOS x86_64/aarch64) |
 | **homebrew-core** | `brew install nopass`, no tap | Homebrew's notability bar: ~30 forks / 30 watchers / 75 stars, or a maintainer's judgement |
 | **MacPorts** | the other macOS package manager | a Portfile PR; small audience next to Homebrew |
 | **openSUSE (OBS)** | the Open Build Service can build rpm *and* deb for a dozen distros from one spec | an OBS account; effectively a second CI to look after |
