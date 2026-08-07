@@ -1,0 +1,47 @@
+# Maintainer: Sourav <souravsspace@gmail.com>
+#
+# Arch User Repository build. Publish by pushing this file, together with a
+# regenerated .SRCINFO, to ssh://aur@aur.archlinux.org/nopass.git — see
+# ../README.md.
+pkgname=nopass
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Fast, self-contained password manager"
+arch=('x86_64' 'aarch64')
+url="https://github.com/souravsspace/nopass"
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('cargo' 'git')
+optdepends=('git: history and sync for the store'
+            'xclip: clipboard support on X11'
+            'wl-clipboard: clipboard support on Wayland'
+            'gnupg: the optional gpg backend')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('51cd64f81e1187f5ef776bf5cc7aaa1841d63bd555fbd03b5c60b304d4f77790')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --package nopass-cli
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  # Hermetic: no network, no real store, temp dirs throughout.
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 "target/release/nopass" "$pkgdir/usr/bin/nopass"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

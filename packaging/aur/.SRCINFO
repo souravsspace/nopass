@@ -1,0 +1,19 @@
+pkgbase = nopass
+	pkgdesc = Fast, self-contained password manager
+	pkgver = 0.2.0
+	pkgrel = 1
+	url = https://github.com/souravsspace/nopass
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = git
+	depends = gcc-libs
+	optdepends = git: history and sync for the store
+	optdepends = xclip: clipboard support on X11
+	optdepends = wl-clipboard: clipboard support on Wayland
+	optdepends = gnupg: the optional gpg backend
+	source = nopass-0.2.0.tar.gz::https://github.com/souravsspace/nopass/archive/refs/tags/v0.2.0.tar.gz
+	sha256sums = 51cd64f81e1187f5ef776bf5cc7aaa1841d63bd555fbd03b5c60b304d4f77790
+
+pkgname = nopass
