@@ -24,7 +24,7 @@ impl Unlocker for CliUnlocker {
     fn unlock(&self, locked: &LockedIdentity) -> CoreResult<String> {
         let passphrase_only = std::env::var(FORCE_ENV).as_deref() == Ok("passphrase");
 
-        #[cfg(all(target_os = "macos", feature = "touchid"))]
+        #[cfg(target_os = "macos")]
         if !passphrase_only {
             if let Some(slot) = &locked.keychain_slot {
                 match crate::touchid::unlock_slot(slot) {
