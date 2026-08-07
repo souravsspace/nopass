@@ -1,0 +1,118 @@
+# Attaches prebuilt binaries and a .deb to a release, so installing nopass
+# is a download rather than a five-minute Rust build. Also what makes
+# `cargo binstall nopass-cli` work.
+#
+# Runs when a v* tag is pushed. To fill in a release that already exists,
+# run it by hand: gh workflow run release.yml -f tag=v0.2.0
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and upload for, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # musl, so one Linux binary works on every distribution.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install the toolchain
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: endsWith(matrix.target, '-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked --package nopass-cli --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          version="${{ inputs.tag || github.ref_name }}"
+          version="${version#v}"
+          name="nopass-${version}-${{ matrix.target }}"
+          strip "target/${{ matrix.target }}/release/nopass" || true
+          mkdir -p "dist/${name}"
+          cp "target/${{ matrix.target }}/release/nopass" README.md LICENSE "dist/${name}/"
+          tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+          shasum -a 256 "dist/${name}.tar.gz" | sed "s| .*/| |" > "dist/${name}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz*
+
+  debs:
+    name: deb (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build
+        run: |
+          cargo deb --package nopass-cli \
+            --maintainer "Sourav <souravsspace@gmail.com>" \
+            -- --locked
+          mkdir -p dist && cp target/debian/*.deb dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: dist/*.deb
+
+  upload:
+    needs: [binaries, debs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          (cd dist && shasum -a 256 *.tar.gz *.deb > checksums.txt)
+          gh release upload "$tag" dist/* --clobber --repo "${{ github.repository }}"
