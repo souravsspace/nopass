@@ -24,6 +24,22 @@ sha2.workspace = true
 zeroize.workspace = true
 ctap-hid-fido2 = { workspace = true, optional = true }
 
+# Where `cargo binstall nopass-cli` looks for the binaries the release
+# workflow attaches. Linux builds are musl, so a gnu host is pointed at the
+# musl archive rather than told there is nothing for it.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/nopass-{ version }-{ target }.tar.gz"
+bin-dir = "nopass-{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/nopass-{ version }-x86_64-unknown-linux-musl.tar.gz"
+bin-dir = "nopass-{ version }-x86_64-unknown-linux-musl/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/nopass-{ version }-aarch64-unknown-linux-musl.tar.gz"
+bin-dir = "nopass-{ version }-aarch64-unknown-linux-musl/{ bin }{ binary-ext }"
+
 [features]
 default = []
 # FIDO2 security key (passkey) unlock slot, over USB HID. Off by default
