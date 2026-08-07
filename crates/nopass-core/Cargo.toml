@@ -12,6 +12,8 @@ base64.workspace = true
 thiserror.workspace = true
 rand.workspace = true
 walkdir.workspace = true
+anyhow.workspace = true
+libc.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
