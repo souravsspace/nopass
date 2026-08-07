@@ -267,7 +267,7 @@ key, change the passphrase, or lock a key that was created with
 `--no-passphrase`:
 
 ```sh
-nopass passkey enroll                   # passphrase (and Touch ID on macOS)
+nopass passkey enroll                   # passphrase (and Touch ID on macOS, signed builds)
 nopass passkey enroll --security-key    # …plus a FIDO2 key, e.g. a YubiKey
 ```
 
@@ -324,6 +324,38 @@ nopass passkey disable       # unlock (prompts), then store plaintext again
 
 Re-running `enroll` on an already-locked identity unlocks it first, so you can
 change the passphrase or add slots later.
+
+### Biometric unlock, per platform
+
+| Platform | Biometric slot | Status |
+|---|---|---|
+| macOS | Touch ID, via a Secure Enclave key | works, **but only on a signed build** |
+| Windows | Windows Hello | not implemented — use a security key |
+| Linux | — | nothing that binds keys; use a security key |
+
+**macOS.** The Touch ID slot enrolls a biometry-gated key inside the Secure
+Enclave and encrypts your identity to it, so the secret is recoverable only
+after a successful Touch ID prompt. macOS grants that only to binaries signed
+with keychain entitlements authorized by an embedded provisioning profile. A
+build from source — `cargo install`, or Homebrew compiling the formula —
+cannot do it, and says so:
+
+```
+Skipping Touch ID slot: this build of nopass is not code-signed, so macOS
+refuses to create a Secure Enclave key. Install the signed release to use
+Touch ID; a passphrase or security key works with any build.
+```
+
+Everything else works normally; only this slot is unavailable. Building a
+signed release is documented in [RELEASING.md](RELEASING.md) and scripted in
+[`packaging/macos/sign.sh`](packaging/macos/sign.sh).
+
+**Windows and Linux.** No biometric slot yet. Windows Hello may be reachable
+through the WebAuthn API's `hmac-secret` extension — unverified. Linux
+fingerprint readers (fprintd) only prove someone touched the sensor; they
+release no key material, so a slot built on them would be bypassed by reading
+the identity file, and shipping that would be worse than not having it. On
+both platforms a FIDO2 security key gives real hardware-backed unlock today.
 
 ### Security keys (passkeys)
 
