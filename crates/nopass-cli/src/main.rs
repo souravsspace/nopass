@@ -10,7 +10,7 @@ use nopass_core::lock::{
 use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, Unlocker};
 use zeroize::Zeroize;
 
-mod agent;
+use nopass_core::agent;
 mod auth;
 mod fido2;
 mod setup;
