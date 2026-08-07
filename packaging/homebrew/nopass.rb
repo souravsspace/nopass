@@ -5,8 +5,8 @@
 class Nopass < Formula
   desc "Fast, self-contained password manager"
   homepage "https://github.com/souravsspace/nopass"
-  url "https://github.com/souravsspace/nopass/archive/refs/tags/v0.2.0.tar.gz"
-  sha256 "51cd64f81e1187f5ef776bf5cc7aaa1841d63bd555fbd03b5c60b304d4f77790"
+  url "https://github.com/souravsspace/nopass/archive/refs/tags/v0.2.1.tar.gz"
+  sha256 "35ab5dfc18f22cc255a71b8d0f678d4d3034768df6e0f32ca25c2be63b7dd491"
   license "MIT"
 
   depends_on "rust" => :build
