@@ -5,10 +5,15 @@ use crate::error::{Error, Result};
 /// Name of the per-directory recipients file.
 pub const ID_FILE: &str = ".nopass-id";
 
-/// Reject paths that try to escape the store via `..` components.
+/// Reject paths that try to escape the store. `..` is the obvious way out;
+/// an absolute path is the quieter one, because `Path::join` drops the base
+/// it is joined to when the argument starts at the root.
 pub fn check_sneaky_path(path: &str) -> Result<()> {
-    let sneaky =
-        path == ".." || path.starts_with("../") || path.ends_with("/..") || path.contains("/../");
+    let sneaky = path == ".."
+        || path.starts_with("../")
+        || path.ends_with("/..")
+        || path.contains("/../")
+        || Path::new(path).is_absolute();
     if sneaky {
         return Err(Error::SneakyPath);
     }
@@ -60,6 +65,15 @@ mod tests {
     #[test]
     fn sneaky_paths_rejected() {
         for bad in ["..", "../x", "x/../y", "x/.."] {
+            assert!(check_sneaky_path(bad).is_err(), "{bad} should be sneaky");
+        }
+    }
+
+    #[test]
+    fn absolute_paths_rejected() {
+        // Path::join throws the store root away when handed an absolute
+        // path, so "/etc/passwd" would name a file outside the store.
+        for bad in ["/etc/passwd", "//tmp/x", "/", "/tmp/outside/loot"] {
             assert!(check_sneaky_path(bad).is_err(), "{bad} should be sneaky");
         }
     }
