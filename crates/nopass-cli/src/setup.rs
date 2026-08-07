@@ -34,6 +34,19 @@ fn ask_hidden(prompt: &str) -> Result<String> {
 /// Filename used when the user names a directory rather than a file.
 const IDENTITY_FILENAME: &str = "identity.txt";
 
+/// Folder nopass makes for itself inside a directory the user names.
+const IDENTITY_DIRNAME: &str = "nopass";
+
+/// Where the key goes inside a directory the user pointed at: its own
+/// `nopass/` folder, the same shape as the default `~/.config/nopass`. Being
+/// handed `~/Desktop` should not scatter an `identity.txt` across the desktop.
+fn identity_in_dir(dir: &Path) -> PathBuf {
+    if dir.file_name() == Some(IDENTITY_DIRNAME.as_ref()) {
+        return dir.join(IDENTITY_FILENAME);
+    }
+    dir.join(IDENTITY_DIRNAME).join(IDENTITY_FILENAME)
+}
+
 /// Where a new keypair would be written, without asking anything. Used to
 /// report "an identity already exists" before setup starts talking.
 pub fn target_path(explicit: Option<&str>) -> Result<PathBuf> {
@@ -78,7 +91,7 @@ fn resolve(input: &str) -> Result<PathBuf> {
         bail!("Error: no path given for the private key.");
     }
     if path.is_dir() || input.ends_with('/') {
-        return Ok(path.join(IDENTITY_FILENAME));
+        return Ok(identity_in_dir(&path));
     }
     Ok(path)
 }
@@ -107,7 +120,7 @@ fn choose_location(explicit: Option<&str>, unattended: bool) -> Result<(PathBuf,
     println!("yours to keep and to back up — without it, no password can be recovered.\n");
     println!("Where should the private key live?");
     println!("  [1] {}   (default)", default.display());
-    println!("  [2] a directory you choose");
+    println!("  [2] a directory you choose (nopass makes a nopass/ folder in it)");
 
     match ask("Choice [1]: ")?.as_str() {
         "" | "1" => Ok((default, false)),
@@ -116,10 +129,11 @@ fn choose_location(explicit: Option<&str>, unattended: bool) -> Result<(PathBuf,
             if dir.is_empty() {
                 bail!("Error: no directory given for the private key.");
             }
-            let dir = config::expand_tilde(&dir);
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("could not create {}", dir.display()))?;
-            Ok((dir.join(IDENTITY_FILENAME), true))
+            let path = identity_in_dir(&config::expand_tilde(&dir));
+            let parent = path.parent().expect("the key always sits in a folder");
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("could not create {}", parent.display()))?;
+            Ok((path, true))
         }
         other => bail!("Error: {other:?} is not one of the choices (1 or 2)."),
     }
@@ -177,18 +191,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_directory_gets_the_default_filename() {
+    fn a_directory_gets_its_own_nopass_folder() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().to_str().unwrap();
         assert_eq!(
             resolve(dir).unwrap(),
-            tmp.path().join(IDENTITY_FILENAME),
-            "an existing directory should hold identity.txt"
+            tmp.path().join("nopass/identity.txt"),
+            "pointing at a directory should not scatter identity.txt into it"
         );
         // A trailing slash means "directory" even before it exists.
         assert_eq!(
-            resolve("/nowhere/keys/").unwrap(),
-            PathBuf::from("/nowhere/keys").join(IDENTITY_FILENAME)
+            resolve("/nowhere/Desktop/").unwrap(),
+            PathBuf::from("/nowhere/Desktop/nopass/identity.txt")
+        );
+    }
+
+    #[test]
+    fn a_directory_already_called_nopass_is_not_nested_twice() {
+        assert_eq!(
+            resolve("/keys/nopass/").unwrap(),
+            PathBuf::from("/keys/nopass/identity.txt")
         );
     }
 
