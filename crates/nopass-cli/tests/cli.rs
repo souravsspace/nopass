@@ -376,6 +376,16 @@ impl NativeStore {
         self.dir.path().join(format!("device-{name}"))
     }
 
+    /// `init` with an unprotected key. Used by the tests that are about
+    /// something other than the passphrase; first-run setup is covered on
+    /// its own further down.
+    fn init_unprotected(&self) {
+        self.cmd()
+            .args(["init", "--no-passphrase"])
+            .assert()
+            .success();
+    }
+
     /// A command run with security key `name` plugged in.
     fn cmd_with_key(&self, name: &str) -> Command {
         let mut cmd = self.cmd();
@@ -389,20 +399,24 @@ fn native_keygen_creates_identity_and_prints_public_key() {
     let store = NativeStore::new();
     store
         .cmd()
-        .arg("keygen")
+        .args(["keygen", "--no-passphrase"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Public key: age1"));
+        .stdout(predicate::str::contains("Private key:").and(predicate::str::contains("age1")));
     assert!(store.dir.path().join("identity.txt").exists());
 
     // Refuses to clobber without --force
     store
         .cmd()
-        .arg("keygen")
+        .args(["keygen", "--no-passphrase"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
-    store.cmd().args(["keygen", "--force"]).assert().success();
+    store
+        .cmd()
+        .args(["keygen", "--force", "--no-passphrase"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -411,7 +425,7 @@ fn native_init_bootstraps_keypair_automatically() {
     // No keygen first: init generates the identity itself.
     store
         .cmd()
-        .arg("init")
+        .args(["init", "--no-passphrase"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Store initialized for age1"));
@@ -438,7 +452,7 @@ fn native_init_bootstraps_keypair_automatically() {
 #[test]
 fn native_generate_and_show_roundtrip() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["generate", "cred", "31"])
@@ -452,7 +466,7 @@ fn native_generate_and_show_roundtrip() {
 #[test]
 fn native_wrong_identity_cannot_decrypt() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["insert", "-e", "cred"])
@@ -461,14 +475,18 @@ fn native_wrong_identity_cannot_decrypt() {
         .success();
 
     // Swap in a fresh identity: decryption must fail.
-    store.cmd().args(["keygen", "--force"]).assert().success();
+    store
+        .cmd()
+        .args(["keygen", "--force", "--no-passphrase"])
+        .assert()
+        .success();
     store.cmd().args(["show", "cred"]).assert().failure();
 }
 
 #[test]
 fn passkey_enroll_locks_identity_and_gates_access() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["insert", "-e", "cred"])
@@ -545,7 +563,7 @@ fn passkey_enroll_locks_identity_and_gates_access() {
 #[test]
 fn passkey_enroll_rejects_mismatched_passphrases() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["passkey", "enroll"])
@@ -560,7 +578,7 @@ fn locked_identity_without_input_does_not_hang() {
     // With no passphrase available on a closed stdin, unlocking fails
     // rather than succeeding or blocking forever.
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["insert", "-e", "cred"])
@@ -594,7 +612,7 @@ fn locked_identity_without_input_does_not_hang() {
 /// A locked store with one entry and a security key enrolled.
 fn store_with_security_key() -> NativeStore {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["insert", "-e", "cred"])
@@ -709,7 +727,7 @@ fn someone_elses_security_key_does_not_unlock_the_store() {
 #[test]
 fn enrolling_without_a_key_present_leaves_the_identity_alone() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     let before = store.identity_text();
 
     store
@@ -728,7 +746,7 @@ fn enrolling_without_a_key_present_leaves_the_identity_alone() {
 #[test]
 fn a_key_can_be_added_to_an_already_locked_identity() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["insert", "-e", "cred"])
@@ -764,7 +782,7 @@ fn a_key_can_be_added_to_an_already_locked_identity() {
 #[test]
 fn add_key_refuses_an_unlocked_identity() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd_with_key("main")
         .args(["passkey", "add-key"])
@@ -861,7 +879,7 @@ fn duplicate_and_invalid_key_names_are_rejected() {
 #[test]
 fn a_pin_protected_key_asks_for_the_pin_and_falls_back_when_it_is_wrong() {
     let store = NativeStore::new();
-    store.cmd().arg("init").assert().success();
+    store.init_unprotected();
     store
         .cmd()
         .args(["insert", "-e", "cred"])
@@ -1051,4 +1069,507 @@ fn autosync_pulls_remote_changes_before_pushing() {
     assert!(log.contains("from-other-machine"), "{log}");
     assert!(log.contains("cred3"), "{log}");
     assert!(store.exists("from-other-machine.np"));
+}
+
+// ---- first run: where the private key goes, and locking it by default ----
+//
+// These run against an empty HOME with no NOPASS_IDENTITY, which is what a
+// new install actually looks like: setup has to ask where the key belongs
+// and what protects it, and remember the answer for later commands.
+
+struct FreshMachine {
+    dir: tempfile::TempDir,
+}
+
+impl FreshMachine {
+    fn new() -> Self {
+        let machine = Self {
+            dir: tempfile::tempdir().unwrap(),
+        };
+        std::fs::create_dir_all(machine.home()).unwrap();
+        machine
+    }
+
+    fn cmd(&self) -> Command {
+        let mut cmd = Command::cargo_bin("nopass").unwrap();
+        cmd.env("HOME", self.home())
+            .env("NOPASS_DIR", self.dir.path().join("store"))
+            .env_remove("NOPASS_IDENTITY")
+            .env_remove("NOPASS_CONFIG")
+            .env_remove("NOPASS_BACKEND")
+            .env_remove("NOPASS_KEY")
+            .env_remove("NOPASS_FIDO2_MOCK")
+            .env_remove("NOPASS_UNLOCK");
+        cmd
+    }
+
+    fn home(&self) -> std::path::PathBuf {
+        self.dir.path().join("home")
+    }
+
+    fn default_identity(&self) -> std::path::PathBuf {
+        self.home().join(".config/nopass/identity.txt")
+    }
+
+    fn config(&self) -> std::path::PathBuf {
+        self.home().join(".config/nopass/config")
+    }
+
+    /// Complete setup taking the default location, with `passphrase`.
+    fn set_up_with(&self, passphrase: &str) {
+        self.cmd()
+            .arg("init")
+            .write_stdin(format!("1\n{passphrase}\n{passphrase}\n"))
+            .assert()
+            .success();
+    }
+
+    fn insert(&self, name: &str, password: &str) {
+        self.cmd()
+            .args(["insert", "-e", name])
+            .write_stdin(format!("{password}\n"))
+            .assert()
+            .success();
+    }
+}
+
+/// Whether the identity file is locked. A file claiming to be locked had
+/// better not still hold the secret key.
+fn is_locked(path: &std::path::Path) -> bool {
+    let contents = std::fs::read_to_string(path).unwrap();
+    let locked = contents.starts_with("# nopass-locked v1");
+    if locked {
+        assert!(
+            !contents.contains("AGE-SECRET-KEY"),
+            "secret key left in the clear at {}:\n{contents}",
+            path.display()
+        );
+    }
+    locked
+}
+
+#[test]
+fn first_run_says_where_the_key_goes_and_locks_it() {
+    let machine = FreshMachine::new();
+    let default = machine.default_identity();
+
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("1\nmaster\nmaster\n")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Where should the private key live?")
+                .and(predicate::str::contains(default.display().to_string()))
+                .and(predicate::str::contains("Public key:  age1"))
+                .and(predicate::str::contains("Back up the private key file")),
+        );
+
+    assert!(is_locked(&default), "a fresh key must be locked");
+    // The default location needs no config file to be found again.
+    assert!(!machine.config().exists());
+}
+
+#[test]
+fn first_run_can_put_the_key_in_a_directory_of_your_choosing() {
+    let machine = FreshMachine::new();
+    let keys = machine.dir.path().join("my keys/nopass");
+
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin(format!("2\n{}\nmaster\nmaster\n", keys.display()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Remembered:"));
+
+    let identity = keys.join("identity.txt");
+    assert!(
+        is_locked(&identity),
+        "the chosen location should hold the key"
+    );
+    assert!(!machine.default_identity().exists());
+
+    // The choice is remembered, so later commands find it with no env var.
+    let config = std::fs::read_to_string(machine.config()).unwrap();
+    assert!(config.contains(&identity.display().to_string()), "{config}");
+
+    machine.insert("gmail", "hunter2");
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn pressing_enter_takes_the_default_location() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("\nmaster\nmaster\n")
+        .assert()
+        .success();
+    assert!(is_locked(&machine.default_identity()));
+}
+
+#[test]
+fn a_nonsense_choice_is_rejected_rather_than_guessed() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("7\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not one of the choices"));
+    assert!(!machine.default_identity().exists());
+}
+
+#[test]
+fn setup_with_nothing_on_stdin_explains_itself() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("needs a terminal")
+                .and(predicate::str::contains("--no-passphrase")),
+        );
+    assert!(
+        !machine.default_identity().exists(),
+        "a failed setup must not leave a key behind"
+    );
+}
+
+#[test]
+fn setup_refuses_an_empty_or_mistyped_passphrase() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("1\n\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("must not be empty"));
+
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("1\none\ntwo\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("do not match"));
+
+    assert!(!machine.default_identity().exists());
+}
+
+#[test]
+fn the_passphrase_is_asked_for_on_every_command() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert("gmail", "hunter2");
+
+    // Reading it works with the passphrase...
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+
+    // ...and the very next command asks again: nothing is cached on disk,
+    // so an empty answer cannot read anything.
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .failure();
+
+    // A wrong passphrase is refused rather than returning garbage.
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("not-it\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("authentication failed"));
+}
+
+#[test]
+fn one_command_asks_only_once_however_many_entries_it_reads() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert("gmail", "hunter2");
+    machine.insert("bank", "hunter2");
+    machine.insert("work/vpn", "hunter2");
+
+    // grep decrypts every entry in the store. One passphrase on stdin is
+    // all it gets; if it re-asked per entry, the second read would fail.
+    machine
+        .cmd()
+        .args(["grep", "hunter2"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("gmail")
+                .and(predicate::str::contains("bank"))
+                .and(predicate::str::contains("work/vpn")),
+        );
+
+    // So does re-initializing, which re-encrypts the whole store.
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("master\n")
+        .assert()
+        .success();
+}
+
+#[test]
+fn writing_a_password_needs_no_passphrase_at_all() {
+    // Encryption only needs the public key, exactly as with pass and gpg.
+    // The password itself is the only thing on stdin here.
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine
+        .cmd()
+        .args(["insert", "-e", "gmail"])
+        .write_stdin("hunter2\n")
+        .assert()
+        .success();
+    machine
+        .cmd()
+        .args(["generate", "bank", "20"])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn moving_an_entry_reencrypts_after_a_single_prompt() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert("gmail", "hunter2");
+
+    machine
+        .cmd()
+        .args(["mv", "-f", "gmail", "mail/google"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+    machine
+        .cmd()
+        .args(["show", "mail/google"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn the_identity_flag_places_the_key_and_is_remembered() {
+    let machine = FreshMachine::new();
+    let path = machine.dir.path().join("vault/work-key.txt");
+
+    machine
+        .cmd()
+        .args(["init", "--identity", path.to_str().unwrap()])
+        .write_stdin("master\nmaster\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Where should").not());
+
+    assert!(is_locked(&path));
+    let config = std::fs::read_to_string(machine.config()).unwrap();
+    assert!(config.contains(&path.display().to_string()), "{config}");
+
+    machine.insert("gmail", "hunter2");
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn an_existing_key_is_never_asked_about_again() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    let before = std::fs::read_to_string(machine.default_identity()).unwrap();
+
+    // A second init reuses the key: no questions, no new keypair.
+    machine
+        .cmd()
+        .arg("init")
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Where should").not());
+    assert_eq!(
+        std::fs::read_to_string(machine.default_identity()).unwrap(),
+        before
+    );
+
+    // keygen still refuses to replace it by accident.
+    machine
+        .cmd()
+        .arg("keygen")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
+}
+
+#[test]
+fn unattended_setup_makes_an_unprotected_key_and_says_so() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .args(["init", "--no-passphrase"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("unprotected private key"));
+
+    assert!(!is_locked(&machine.default_identity()));
+    machine.insert("gmail", "hunter2");
+
+    // Nothing to type, ever.
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+}
+
+#[test]
+fn an_unprotected_key_can_be_locked_afterwards_and_unlocked_again() {
+    let machine = FreshMachine::new();
+    machine
+        .cmd()
+        .args(["init", "--no-passphrase"])
+        .assert()
+        .success();
+    machine.insert("gmail", "hunter2");
+
+    machine
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("master\nmaster\n")
+        .assert()
+        .success();
+    assert!(is_locked(&machine.default_identity()));
+
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+
+    // A locked identity still knows its own public key, so writing a new
+    // entry needs no unlocking.
+    machine
+        .cmd()
+        .args(["insert", "-e", "bank"])
+        .write_stdin("s3cret\n")
+        .assert()
+        .success();
+    machine
+        .cmd()
+        .args(["show", "bank"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("s3cret\n");
+
+    machine
+        .cmd()
+        .args(["passkey", "disable"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+    assert!(!is_locked(&machine.default_identity()));
+}
+
+#[test]
+fn a_passphrase_can_be_changed_by_enrolling_again() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("old-pass");
+    machine.insert("gmail", "hunter2");
+
+    machine
+        .cmd()
+        .args(["passkey", "enroll"])
+        .write_stdin("old-pass\nnew-pass\nnew-pass\n")
+        .assert()
+        .success();
+
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("new-pass\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("old-pass\n")
+        .assert()
+        .failure();
+}
+
+#[cfg(unix)]
+#[test]
+fn editing_an_entry_asks_once_even_though_it_decrypts_twice() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert("gmail", "hunter2");
+
+    // An "editor" that replaces the file it is handed.
+    let editor = machine.dir.path().join("fake-editor");
+    std::fs::write(&editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").unwrap();
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    machine
+        .cmd()
+        .env("EDITOR", &editor)
+        .args(["edit", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success();
+
+    machine
+        .cmd()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("edited\n");
 }
