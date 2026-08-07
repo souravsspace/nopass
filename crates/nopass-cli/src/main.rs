@@ -30,7 +30,9 @@ fn build_crypto() -> Box<dyn Crypto> {
     name = "nopass",
     version,
     about = "nopass: a fast, self-contained password manager",
-    args_conflicts_with_subcommands = true
+    after_help = "Run \"nopass help\" for a tour of every command.\nhttps://github.com/souravsspace/nopass",
+    args_conflicts_with_subcommands = true,
+    disable_help_subcommand = true
 )]
 struct Cli {
     #[command(subcommand)]
@@ -156,6 +158,8 @@ enum Cmd {
         #[command(subcommand)]
         action: PasskeyCmd,
     },
+    /// Show every command, what it does, and where your files live
+    Help,
 }
 
 #[derive(Subcommand)]
@@ -264,10 +268,115 @@ fn run() -> Result<()> {
         Some(Cmd::Git { args }) => cmd_git(&store, &args),
         Some(Cmd::Update { check }) => cmd_update(check),
         Some(Cmd::Passkey { action }) => cmd_passkey(action),
+        Some(Cmd::Help) => cmd_help(),
     }
 }
 
 const REPO: &str = "souravsspace/nopass";
+const REPO_URL: &str = "https://github.com/souravsspace/nopass";
+
+/// The long-form tour. `--help` lists flags; this explains the tool, and
+/// ends with where this machine's files actually are.
+fn cmd_help() -> Result<()> {
+    println!(
+        "\
+nopass {version} — a fast, self-contained password manager
+{REPO_URL}
+
+Entries are individually encrypted files under one directory, each one
+encrypted to your keypair. Reading a password asks for your master
+passphrase; writing one never does.
+
+USAGE
+  nopass                            list the whole store as a tree
+  nopass <entry>                    show an entry
+  nopass <command> [options]
+
+SETUP
+  init [recipients...]              create your key and store
+      -p, --path <subfolder>        (re)initialize just that subfolder
+      --identity <path>             where to keep the private key
+      --no-passphrase               leave the key unprotected (scripts, CI)
+  keygen                            create the keypair without a store
+      -f, --force                   replace the existing key
+
+READING
+  ls [subfolder]                    list entries as a tree
+  show [-c[line]] <entry>           print it, or copy line N to the clipboard
+  find <terms>...                   list entries whose names match
+  grep <pattern>                    search inside decrypted contents
+
+WRITING
+  insert [-e] [-m] [-f] <entry>     add one (echo input / multiline / force)
+  generate [-n] [-c] [-i|-f] <entry> [length]
+                                    make a password (no symbols / clipboard /
+                                    replace first line only / force)
+  edit <entry>                      open it in $EDITOR
+  rm [-r] [-f] <entry>              delete an entry or directory
+  mv [-f] <old> <new>               move, re-encrypting for the destination
+  cp [-f] <old> <new>               copy, re-encrypting for the destination
+
+HISTORY AND SYNC
+  git init                          start versioning the store
+  git <args>...                     any git command, run inside the store
+                                    (changes commit and push themselves)
+
+LOCKING THE KEY
+  passkey status                    is the key locked, and by what
+  passkey enroll                    lock it, or change the passphrase
+      --security-key                also enroll a FIDO2 key (e.g. a YubiKey)
+      --pin                         require the key's PIN as well as a touch
+      --no-touchid                  skip the macOS Touch ID slot
+  passkey add-key [--label <name>]  enroll another security key
+  passkey remove-key <name>         drop one security key
+  passkey disable                   remove the lock, restoring a plain key
+
+MAINTENANCE
+  update [--check]                  check for a new release and install it
+  help                              this page
+
+ALIASES
+  ls=list  rm=remove/delete  mv=rename  cp=copy
+
+ON THIS MACHINE
+{locations}
+ENVIRONMENT
+  NOPASS_DIR        where the store lives
+  NOPASS_IDENTITY   where the private key lives (wins over the config file)
+  NOPASS_CLIP_TIME  seconds before the clipboard is wiped (default 45)
+  NOPASS_UNLOCK     set to \"passphrase\" to skip Touch ID and security keys
+                    (full list in the README)
+
+Losing the private key, or forgetting the passphrase, means losing every
+password in the store. Back the key up somewhere safe.
+
+Full documentation: {REPO_URL}",
+        version = env!("CARGO_PKG_VERSION"),
+        locations = locations(),
+    );
+    Ok(())
+}
+
+/// The paths this machine is actually using, so "where is my key?" never
+/// needs a trip to the README.
+fn locations() -> String {
+    let identity = crypto::default_identity_file();
+    let state = match std::fs::read_to_string(&identity) {
+        Err(_) => "not created yet — run \"nopass init\"",
+        Ok(contents) if LockedIdentity::is_locked_file(&contents) => "locked",
+        Ok(_) => "unprotected",
+    };
+    let mut out = format!(
+        "  store         {}\n  private key   {} ({state})\n",
+        default_store_dir().display(),
+        identity.display(),
+    );
+    let config = nopass_core::config::default_config_file();
+    if config.exists() {
+        out.push_str(&format!("  config        {}\n", config.display()));
+    }
+    out
+}
 
 /// Parse "1.2.3" into a comparable tuple; non-numeric parts become 0.
 fn parse_version(v: &str) -> (u64, u64, u64) {
