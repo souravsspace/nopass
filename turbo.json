@@ -7,8 +7,7 @@
       "outputs": ["dist/**", ".output/**"]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "dependsOn": ["^build"]
     },
     "e2e": {
       "dependsOn": ["build", "//#build:rust"],
