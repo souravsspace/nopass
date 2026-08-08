@@ -7,6 +7,7 @@
  */
 
 import type { Match, Secret } from "@nopass/protocol";
+import type { Draft } from "./messaging";
 import type { SessionState } from "./session";
 
 export interface Bridge {
@@ -19,6 +20,12 @@ export interface Bridge {
   lock: () => Promise<SessionState>;
   /** One entry's secret, for showing or copying in the popup. */
   reveal: (entry: string) => Promise<Secret>;
+  /**
+   * Create one entry. The only call here that changes the store, and it can
+   * only ever create: a name already taken comes back as an `exists` refusal
+   * rather than replacing anything (ADR-0006).
+   */
+  save: (draft: Draft) => Promise<string>;
   /** Entries offered for a page origin. Empty for a non-web tab. */
   search: (origin: string) => Promise<Match[]>;
   session: () => Promise<SessionState>;
