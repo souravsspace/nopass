@@ -11,6 +11,14 @@
 import type { Match, Secret } from "@nopass/protocol";
 import type { SessionState } from "./session";
 
+/** A new login on its way to the store. Never carries an existing name. */
+export interface Draft {
+  entry: string;
+  password: string;
+  url?: string;
+  username?: string;
+}
+
 export type PopupRequest =
   | { kind: "session" }
   | { kind: "unlock"; passphrase: string }
@@ -19,10 +27,15 @@ export type PopupRequest =
   | { kind: "search"; origin: string }
   | { kind: "reveal"; entry: string }
   | { kind: "generate"; length: number; symbols: boolean }
+  | ({ kind: "save" } & Draft)
   | { kind: "fill"; entry: string; tabId: number };
 
-/** The content script's vocabulary. Note the absence of `reveal`: a page's
- * script may cause a fill, but may never be handed a secret to read. */
+/**
+ * The content script's vocabulary. Note the absence of `reveal`: a page's
+ * script may cause a fill, but may never be handed a secret to read — and the
+ * absence of `save`, so a page can never put anything into the store either
+ * (ADR-0006).
+ */
 export type ContentRequest =
   | { kind: "session" }
   | { kind: "matches"; origin: string }
@@ -36,6 +49,7 @@ export type ExtensionSuccess =
   | { ok: true; kind: "matches"; matches: Match[] }
   | { ok: true; kind: "secret"; secret: Secret }
   | { ok: true; kind: "password"; password: string }
+  | { ok: true; kind: "saved"; entry: string }
   | { ok: true; kind: "done" };
 
 export interface ExtensionFailure {
