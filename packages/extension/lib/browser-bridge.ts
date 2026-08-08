@@ -71,6 +71,10 @@ export function browserBridge(): Bridge {
       window.close();
     },
 
+    async list(): Promise<string[]> {
+      return (await expect({ kind: "list" }, "entries")).entries;
+    },
+
     async lock(): Promise<SessionState> {
       return (await expect({ kind: "lock" }, "session")).state;
     },
