@@ -52,8 +52,20 @@
       "json": { "id": 9, "verb": "telepathy" }
     },
     {
-      "name": "insert is rejected: the host is read-only (ADR-0002)",
-      "valid": false,
+      "name": "insert creates one entry (ADR-0006)",
+      "valid": true,
+      "json": {
+        "id": 10,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "password": "hunter2",
+        "username": "sana@example.com",
+        "url": "https://example.com/login"
+      }
+    },
+    {
+      "name": "insert may carry nothing but a password",
+      "valid": true,
       "json": {
         "id": 10,
         "verb": "insert",
@@ -62,22 +74,42 @@
       }
     },
     {
-      "name": "edit is rejected: the host is read-only (ADR-0002)",
+      "name": "insert with an empty password is rejected",
+      "valid": false,
+      "json": {
+        "id": 10,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "password": ""
+      }
+    },
+    {
+      "name": "a newline in an insert field is rejected: it would forge a second field",
+      "valid": false,
+      "json": {
+        "id": 10,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "password": "hunter2\nurl: https://phish.example"
+      }
+    },
+    {
+      "name": "edit is rejected: the host may create but never rewrite (ADR-0006)",
       "valid": false,
       "json": { "id": 11, "verb": "edit", "entry": "web/example.com" }
     },
     {
-      "name": "rm is rejected: the host is read-only (ADR-0002)",
+      "name": "rm is rejected: the host may create but never destroy (ADR-0006)",
       "valid": false,
       "json": { "id": 12, "verb": "rm", "entry": "web/example.com" }
     },
     {
-      "name": "mv is rejected: the host is read-only (ADR-0002)",
+      "name": "mv is rejected: the host may create but never move (ADR-0006)",
       "valid": false,
       "json": { "id": 13, "verb": "mv", "from": "a", "to": "b" }
     },
     {
-      "name": "cp is rejected: the host is read-only (ADR-0002)",
+      "name": "cp is rejected: the host may create but never copy (ADR-0006)",
       "valid": false,
       "json": { "id": 14, "verb": "cp", "from": "a", "to": "b" }
     },
@@ -239,6 +271,28 @@
         "ok": true,
         "verb": "generate",
         "password": "aX7!qm2Ldp0Ze4Rv"
+      }
+    },
+    {
+      "name": "insert confirms the entry it created, and nothing else",
+      "valid": true,
+      "json": {
+        "id": 10,
+        "ok": true,
+        "verb": "insert",
+        "entry": "web/example.com"
+      }
+    },
+    {
+      "name": "a name already in the store is its own refusal, not an overwrite",
+      "valid": true,
+      "json": {
+        "id": 10,
+        "ok": false,
+        "error": {
+          "code": "exists",
+          "message": "web/example.com is already in the store"
+        }
       }
     },
     {
