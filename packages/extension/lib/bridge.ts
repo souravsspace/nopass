@@ -14,6 +14,8 @@ export interface Bridge {
   currentOrigin: () => Promise<string | null>;
   /** Fill the active tab with an entry. */
   fill: (entry: string) => Promise<void>;
+  /** Every entry name in the store. Names only — never a secret. */
+  list: () => Promise<string[]>;
   lock: () => Promise<SessionState>;
   /** One entry's secret, for showing or copying in the popup. */
   reveal: (entry: string) => Promise<Secret>;
