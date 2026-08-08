@@ -41,6 +41,7 @@ export function Popup({ bridge }: { bridge: Bridge }) {
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [remaining, setRemaining] = useState(0);
 
@@ -182,11 +183,17 @@ export function Popup({ bridge }: { bridge: Bridge }) {
     }
   };
 
+  // A refusal is the whole answer here: the host says whether the passphrase
+  // was wrong or whether it could not hold the unlock, and a popup that
+  // swallowed that would look exactly the same either way.
   const onUnlock = async (passphrase: string) => {
     setBusy(true);
+    setRefused(null);
     try {
       setSession(await bridge.unlock(passphrase));
       await load();
+    } catch (error) {
+      setRefused(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -211,7 +218,13 @@ export function Popup({ bridge }: { bridge: Bridge }) {
       )}
       {session.status === "no-store" && <NoStore onCopied={flash} />}
       {session.status === "locked" && (
-        <Unlock busy={busy} host={host} onUnlock={onUnlock} />
+        <Unlock
+          busy={busy}
+          host={host}
+          onEdit={() => setRefused(null)}
+          onUnlock={onUnlock}
+          refused={refused}
+        />
       )}
 
       {session.status === "unlocked" && (
@@ -398,11 +411,15 @@ function CommandRow({
 function Unlock({
   busy,
   host,
+  onEdit,
   onUnlock,
+  refused,
 }: {
   busy: boolean;
   host: string | null;
+  onEdit: () => void;
   onUnlock: (passphrase: string) => void;
+  refused: string | null;
 }) {
   const [passphrase, setPassphrase] = useState("");
 
@@ -444,14 +461,23 @@ function Unlock({
           Master passphrase
         </label>
         <Input
+          aria-invalid={refused !== null}
           autoFocus
           data-secret
           id="np-passphrase"
-          onChange={(event) => setPassphrase(event.target.value)}
+          onChange={(event) => {
+            setPassphrase(event.target.value);
+            onEdit();
+          }}
           placeholder="••••••••••••"
           type="password"
           value={passphrase}
         />
+        {refused !== null && (
+          <p className="text-[12px] text-warning leading-normal" role="alert">
+            {refused}
+          </p>
+        )}
       </div>
 
       <Button
