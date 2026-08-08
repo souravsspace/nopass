@@ -21,7 +21,8 @@ straight into the CLI. No external key tooling required.
 - [`crates/nopass-cli`](crates/nopass-cli) — the `nopass` CLI binary
 - [`crates/nopass-host`](crates/nopass-host) — native messaging host the
   browser extension talks to
-- [`packages/extension`](packages/extension) — the browser extension, read-only
+- [`packages/extension`](packages/extension) — the browser extension, which
+  fills and creates but never rewrites
   ([GUIDE.md](GUIDE.md))
 - `apps/web` — marketing site *(planned)*
 - `apps/desktop` — desktop app, Tauri over nopass-core *(planned)*
