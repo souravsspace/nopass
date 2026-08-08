@@ -62,6 +62,13 @@ too, for as long as your configured `cache-ttl` lasts — and the reverse holds,
 so warming the agent from a terminal skips this screen entirely. See
 [Authentication and the passphrase cache](README.md#authentication-and-the-passphrase-cache).
 
+An unlock has nowhere to live but the agent, so the host starts one — using the
+`nopass` sitting beside `nopass-host`, and only then `PATH`. A browser launched
+from a Dock or Start-menu icon does **not** inherit your shell's `PATH`, which
+is why the neighbour is tried first. If the popup says the agent did not keep
+the passphrase, the two binaries have been separated; reinstall, or set
+`cache-ttl` and warm the agent from a terminal.
+
 ### The pill in the top right
 
 Unlocked, it reads a countdown — `4:28`. That is the agent's remaining lease
@@ -176,6 +183,14 @@ in the chrome competes with the entry being filled. Type is Newsreader
 Everything lives in **`packages/ui/src/styles/globals.css`**. It keeps the
 shadcn variable names and repoints their values, so the components in
 `packages/ui/src/components` need no edit when the palette moves.
+
+**Light or dark is the system's call, not a setting.** An extension page has
+nothing to inherit from, so `followSystemTheme` in
+`packages/extension/lib/theme.ts` reads `prefers-color-scheme` and mirrors it
+onto a `.dark` class on `<html>`, live — flip your OS theme with the popup open
+and it follows. The class, rather than the media query alone, because the
+`dark:` utilities in the shared components only fire on a class. The workbench's
+Dark toggle drives that same class by hand.
 
 Fonts are **bundled, never fetched**. An extension page may not load a remote
 font under MV3's CSP, and a request on popup open would announce that the popup
