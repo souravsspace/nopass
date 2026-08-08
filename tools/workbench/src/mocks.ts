@@ -120,6 +120,23 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
         ? Promise.resolve(found)
         : Promise.reject(new Error(`${entry} is not in the store`));
     },
+    save(draft) {
+      log(`save(${draft.entry})`);
+      // The refusal that matters is the one the real host makes: a name
+      // already taken is never overwritten (ADR-0006).
+      if (ENTRIES.some((entry) => entry.name === draft.entry)) {
+        return Promise.reject(
+          new BridgeError("exists", `${draft.entry} is already in the store`)
+        );
+      }
+      ENTRIES.push({
+        name: draft.entry,
+        password: draft.password,
+        ...(draft.url ? { url: draft.url } : {}),
+        ...(draft.username ? { username: draft.username } : {}),
+      });
+      return Promise.resolve(draft.entry);
+    },
     search(origin: string) {
       log(`search(${origin})`);
       if (scenario === "empty") {
