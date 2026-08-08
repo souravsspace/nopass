@@ -7,6 +7,8 @@ const FILL_GITHUB = /fill\(web\/github\.com\)/;
 const FILL_GITHUB_WORK = /fill\(web\/github\.com-work\)/;
 const ANY_REVEAL = /reveal\(/;
 const REVEAL_GITHUB = /reveal\(web\/github\.com\)/;
+const SAVE_EXAMPLE = /save\(web\/example\.com\)/;
+const GITHUB_PASSWORD = "9x!Kd2pQvr4TmZ";
 const LIST_CALL = /list\(\)/;
 const LOCK_CALL = /lock\(\)/;
 const HOST_INSTALL = /nopass-host install/;
@@ -133,6 +135,71 @@ test.describe("the popup", () => {
       .click();
 
     await expect(page.getByText(REVEAL_GITHUB)).toBeVisible();
+  });
+
+  test("opens one entry on its own screen without leaving the list behind", async ({
+    page,
+  }) => {
+    await scenario(page, "Unlocked");
+    await popup(page)
+      .getByRole("button", { exact: true, name: "View web/github.com" })
+      .click();
+
+    // Everything the entry holds, and the password masked until asked for.
+    await expect(popup(page).getByText("sana@example.com")).toBeVisible();
+    await expect(popup(page).getByText("https://github.com")).toBeVisible();
+    await expect(popup(page).getByText(GITHUB_PASSWORD)).toHaveCount(0);
+
+    await popup(page)
+      .getByRole("button", { name: "Show the Password" })
+      .click();
+    await expect(popup(page).getByText(GITHUB_PASSWORD)).toBeVisible();
+
+    await popup(page).getByRole("button", { name: "Back" }).click();
+    await expect(
+      popup(page).getByPlaceholder("Search your store")
+    ).toBeVisible();
+  });
+
+  test("saves a new login through the bridge", async ({ page }) => {
+    await scenario(page, "Unlocked");
+    await popup(page).getByRole("button", { name: "New login" }).click();
+
+    // Pre-filled from the tab it was opened over, so the common case is a
+    // password and a Save.
+    await expect(popup(page).getByLabel("Name", { exact: true })).toHaveValue(
+      "web/github.com"
+    );
+    await expect(popup(page).getByLabel("Website")).toHaveValue(
+      "https://github.com"
+    );
+
+    await popup(page)
+      .getByLabel("Name", { exact: true })
+      .fill("web/example.com");
+    await popup(page).getByLabel("Email or username").fill("sana@example.com");
+    await popup(page).getByLabel("Password", { exact: true }).fill("hunter2");
+    await popup(page).getByRole("button", { name: "Save to store" }).click();
+
+    await expect(page.getByText(SAVE_EXAMPLE)).toBeVisible();
+    await expect(popup(page).getByText("example.com added.")).toBeVisible();
+  });
+
+  test("refuses to overwrite a name that is already taken", async ({
+    page,
+  }) => {
+    await scenario(page, "Unlocked");
+    await popup(page).getByRole("button", { name: "New login" }).click();
+
+    await popup(page).getByLabel("Password", { exact: true }).fill("owned");
+    await popup(page).getByRole("button", { name: "Save to store" }).click();
+
+    await expect(popup(page).getByRole("alert")).toContainText(
+      "already in the store"
+    );
+    await expect(
+      popup(page).getByLabel("Name", { exact: true })
+    ).toHaveAttribute("aria-invalid", "true");
   });
 
   test("locks again on request", async ({ page }) => {
