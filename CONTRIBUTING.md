@@ -124,9 +124,16 @@ Extra care is expected in `lock.rs`, `crypto.rs`, `auth.rs`, `agent.rs` and
   purpose: end-of-input is an error, not a silent default.
 - **Entry names are attacker-controlled.** Everything that resolves a name
   goes through `paths::check_sneaky_path`.
-- **The passphrase cache is opt-in, memory-only, and read-only** — writes
-  always ask the user. Do not add a code path where a cached secret
-  authorises a change to the store.
+- **The passphrase cache is opt-in and memory-only.** In the CLI it is
+  read-only: every mutation calls `Store::authenticate` and asks the user. Do
+  not add a code path where a cached secret **decrypts or replaces** anything.
+  The one deliberate exception is the browser host's `insert`
+  ([ADR-0006](docs/adr/0006-create-only-writes-from-the-extension.md)): it
+  treats a warm cache as "a human unlocked this machine" and creates a new
+  entry on the strength of it. That is allowed because encrypting to the
+  store's public keys reads no secret at all, and because it can only ever
+  create — an existing name is refused, never overwritten. Any verb that has
+  to decrypt to do its job stays out of the browser.
 - **Nothing new gets written to a world-writable directory.**
 
 Please state the threat model of a change in the PR: what an attacker can do
