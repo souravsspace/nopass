@@ -36,13 +36,13 @@ impl Host {
         let verb = raw.get("verb").and_then(Value::as_str).unwrap_or_default();
 
         // Refused on principle, and said so plainly: a caller who asks to
-        // write should learn that this host will not, rather than that it
-        // has never heard of the word (ADR-0002).
+        // rewrite or remove something should learn that this host will not,
+        // rather than that it has never heard of the word (ADR-0006).
         if MUTATING_VERBS.contains(&verb) {
             return proto::failure(
                 id,
                 ErrorCode::ReadOnly,
-                format!("`{verb}` would modify the store; the browser host is read-only"),
+                format!("`{verb}` would change an existing entry; this host only creates"),
             );
         }
 
@@ -137,6 +137,72 @@ impl Host {
                 }),
                 Err(error) => proto::failure(id, ErrorCode::Internal, error.to_string()),
             },
+
+            Request::Insert {
+                entry,
+                password,
+                username,
+                url,
+                ..
+            } => self.insert(id, entry, &password, username.as_deref(), url.as_deref()),
+        }
+    }
+
+    /// Create one entry, and only ever create.
+    ///
+    /// Encryption here needs the recipients' public keys and nothing else, so
+    /// no secret of the user's passes through the browser to make this happen
+    /// — which is why it can be allowed at all (ADR-0006). What it does hand
+    /// the browser is the ability to add to the store, so the two things that
+    /// bound the damage are enforced here and nowhere else:
+    ///
+    /// - the store must be **unlocked**, which is a human having typed the
+    ///   passphrase into this machine within the lease;
+    /// - the name must be **free**. An overwrite would let a compromised
+    ///   extension replace a login with one it knows, which is the attack this
+    ///   verb would otherwise be worth mounting.
+    fn insert(
+        &self,
+        id: u32,
+        name: String,
+        password: &str,
+        username: Option<&str>,
+        url: Option<&str>,
+    ) -> Value {
+        if self.store_state() == StoreState::Missing {
+            return proto::failure(
+                id,
+                ErrorCode::StoreMissing,
+                "there is no store to add an entry to",
+            );
+        }
+
+        if self.session.state().0 == LockState::Locked {
+            return proto::failure(
+                id,
+                ErrorCode::Locked,
+                "the store is locked; unlock before adding an entry",
+            );
+        }
+
+        // Checked before writing rather than relying on the store, which
+        // would happily replace the file.
+        if self.store.entry_exists(&name) {
+            return proto::failure(
+                id,
+                ErrorCode::Exists,
+                format!("{name} is already in the store"),
+            );
+        }
+
+        let body = entry::render(password, username, url);
+        match self.store.insert(&name, body.as_bytes()) {
+            Ok(()) => proto::success(Success::Insert {
+                id,
+                ok: Yes,
+                entry: name,
+            }),
+            Err(error) => proto::failure(id, code_for(&error), error.to_string()),
         }
     }
 
