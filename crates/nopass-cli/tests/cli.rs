@@ -393,6 +393,12 @@ impl NativeStore {
         let mut cmd = Command::cargo_bin("nopass").unwrap();
         cmd.env("NOPASS_DIR", self.dir.path().join("store"))
             .env("NOPASS_IDENTITY", self.dir.path().join("identity.txt"))
+            // Unsetting NOPASS_CACHE_TTL is not enough to switch the cache
+            // off: without this the config falls back to the developer's own
+            // `~/.config/nopass/config`, and a `cache-ttl` set there makes a
+            // read succeed on any passphrase at all — which is exactly what
+            // the tests below are asserting cannot happen.
+            .env("NOPASS_CONFIG", self.dir.path().join("config"))
             // A directory nopass has to make itself, so it can insist on
             // one only the owner can reach.
             .env("NOPASS_AGENT_SOCK", self.dir.path().join("run/agent.sock"))
