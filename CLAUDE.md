@@ -74,6 +74,18 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
   attribution to an AI tool in a commit message, PR body, or code comment.
 - Author is the repository owner. Nothing in the history should reveal how it was written.
 
+## 6. Read the Graph Before the Files
+
+**This repo is four crates and five packages talking to each other. Grep does not show that.**
+
+`graphify-out/` holds a generated map of it: `GRAPH_REPORT.md` (plain language, read this first), `graph.json` (nodes, edges, communities, each edge tagged EXTRACTED / INFERRED / AMBIGUOUS), and `graph.html` (interactive).
+
+- Before planning a change that crosses a boundary — Rust ↔ extension, host ↔ background, core ↔ CLI — read `GRAPH_REPORT.md`.
+- `/graphify query "<question>"` traverses the graph. Use it instead of guessing which file owns a behaviour.
+- `/graphify . --update` after adding or moving files. It re-extracts only what changed.
+- INFERRED edges are the tool's guess, not a fact. Confirm one in the source before relying on it.
+- The graph is generated and git-ignored. Never edit it by hand.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
