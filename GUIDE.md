@@ -1,10 +1,14 @@
 # Browser extension guide
 
-The nopass browser extension fills logins from the store already on your disk.
-It talks to `nopass-host` over native messaging and it **never writes** — there
-is no "save this login" affordance because the wire cannot express one
-([ADR-0002](docs/adr/0002-read-only-extension-v1.md)). Add entries with
-`nopass insert`.
+The nopass browser extension fills logins from the store already on your disk,
+and saves new ones into it. It talks to `nopass-host` over native messaging.
+
+**It can create an entry and nothing more.** There is no schema for `edit`,
+`rm`, `mv` or `cp`, so nothing already in the store can be rewritten, moved or
+destroyed over this wire, and a name that is already taken is refused rather
+than overwritten ([ADR-0006](docs/adr/0006-create-only-writes-from-the-extension.md)).
+Creating needs only your store's public key, so your passphrase never enters
+the browser.
 
 - [Install it](#install-it)
 - [Using the popup](#using-the-popup)
@@ -53,7 +57,7 @@ you remove and re-add the unpacked extension.
 ## Using the popup
 
 The popup is 360 × 556 and holds that shape in every state: the list scrolls,
-the header and the read-only footer do not.
+the header and the footer do not.
 
 ### When the store is locked
 
@@ -139,8 +143,9 @@ sees neither Tailwind nor an `@font-face` rule. **If you change a colour in
 
 ## What the popup asks the host for
 
-Only non-mutating verbs exist on this wire. There is no schema for `insert`,
-`edit`, `rm`, `mv` or `cp`, so a write cannot be expressed at all.
+One mutating verb exists on this wire and it can only create. There is no
+schema for `edit`, `rm`, `mv` or `cp`, so nothing already in the store can be
+reached.
 
 | Verb | Returns | Used by |
 | --- | --- | --- |
@@ -148,11 +153,28 @@ Only non-mutating verbs exist on this wire. There is no schema for `insert`,
 | `unlock` / `lock` | The new lock state | The passphrase form, the pill |
 | `search` | Matches for an origin — **no secret** | "This page" |
 | `list` | Every entry name — **no secret** | "All items" |
-| `get` | One entry's secret | Fill, copy |
+| `get` | One entry's secret | Fill, copy, the entry screen |
+| `insert` | The name it created — **create only** | "New login" |
 
 The content script's vocabulary is narrower than the popup's on purpose: it may
 cause a fill and look up matches, but it may never be handed a secret to read,
-and it cannot enumerate the store.
+it cannot enumerate the store, and it has no `save` — a page's script cannot
+put an entry into your store even if it guessed the shape.
+
+## Viewing and adding
+
+Click the **›** on any row to open that entry on its own screen: username,
+password, `url:` and TOTP, each with a copy button. The password arrives with
+the screen but stays masked until you press **Show**. Clicking the row itself
+still fills, which is what the popup is open for most of the time.
+
+The **+** in the header opens **New login**, pre-filled with the current tab's
+host as the name and its origin as the website — so the usual case is a
+password and a Save. The name is what makes a later fill match: end it in the
+site's host, or let the `url:` line do it.
+
+Saving requires the store to be **unlocked**, and refuses a name that already
+exists. To change or remove an entry, use `nopass edit` or `nopass rm`.
 
 ## The workbench
 
