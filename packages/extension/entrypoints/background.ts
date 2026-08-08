@@ -100,6 +100,13 @@ export default defineBackground(() => {
           return { kind: "session", ok: true, state: session };
         }
 
+        case "list": {
+          // Names only. `list` cannot return a secret, which is why the
+          // popup may ask for the whole store and a content script may not.
+          const reply = await client.request({ verb: "list" });
+          return { entries: reply.entries, kind: "entries", ok: true };
+        }
+
         case "search":
         case "matches": {
           const reply = await client.request({
@@ -170,7 +177,7 @@ export default defineBackground(() => {
     const locked = state.status !== "unlocked";
     try {
       await browser.action.setBadgeText({ text: locked ? "" : "•" });
-      await browser.action.setBadgeBackgroundColor({ color: "#2f7d78" });
+      await browser.action.setBadgeBackgroundColor({ color: "#191817" });
       await browser.action.setTitle({
         title: locked ? "nopass — locked" : "nopass — unlocked",
       });
