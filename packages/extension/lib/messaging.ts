@@ -15,6 +15,7 @@ export type PopupRequest =
   | { kind: "session" }
   | { kind: "unlock"; passphrase: string }
   | { kind: "lock" }
+  | { kind: "list" }
   | { kind: "search"; origin: string }
   | { kind: "reveal"; entry: string }
   | { kind: "generate"; length: number; symbols: boolean }
@@ -31,6 +32,7 @@ export type ExtensionRequest = PopupRequest | ContentRequest;
 
 export type ExtensionSuccess =
   | { ok: true; kind: "session"; state: SessionState }
+  | { ok: true; kind: "entries"; entries: string[] }
   | { ok: true; kind: "matches"; matches: Match[] }
   | { ok: true; kind: "secret"; secret: Secret }
   | { ok: true; kind: "password"; password: string }
