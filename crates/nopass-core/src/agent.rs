@@ -228,17 +228,35 @@ const BIN_ENV: &str = "NOPASS_BIN";
 /// The `nopass` binary, or `None` if this machine has nowhere to find one.
 ///
 /// The CLI is not the only caller any more — `nopass-host` links this module
-/// too — so `current_exe()` is only trusted when it really is `nopass`.
-/// Otherwise the binary is looked up on `PATH` the way a shell would.
+/// too — so the running executable is consulted first and `PATH` only after.
 fn nopass_binary() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(BIN_ENV) {
         return Some(PathBuf::from(path));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if exe.file_name().is_some_and(|name| name == "nopass") {
-            return Some(exe);
-        }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| beside(&exe))
+        .or_else(on_path)
+}
+
+/// The `nopass` that `exe` is, or the one sitting next to it.
+///
+/// `nopass-host` is started by the browser, and a browser started from a Dock
+/// icon inherits launchd's `PATH` — which has neither `~/.cargo/bin` nor
+/// Homebrew on it, so the host could not start an agent and every unlock
+/// bounced straight back to locked. Every install channel puts the two
+/// binaries in one directory, which makes the host's own neighbour a better
+/// answer than an environment it did not choose.
+fn beside(exe: &Path) -> Option<PathBuf> {
+    if exe.file_name()? == "nopass" {
+        return Some(exe.to_path_buf());
     }
+    let sibling = exe.with_file_name("nopass");
+    sibling.is_file().then_some(sibling)
+}
+
+/// The first `nopass` on `PATH`, the way a shell would find it.
+fn on_path() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join("nopass"))
@@ -473,6 +491,23 @@ mod tests {
         let link = tmp.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(private_dir(&link.join("agent.sock")).is_err());
+    }
+
+    #[test]
+    fn the_host_finds_the_cli_next_to_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        let host = tmp.path().join("nopass-host");
+
+        // Alone in its directory it has nothing to offer, and the caller
+        // falls back to PATH.
+        assert_eq!(beside(&host), None);
+
+        let cli = tmp.path().join("nopass");
+        std::fs::write(&cli, "").unwrap();
+        assert_eq!(beside(&host), Some(cli.clone()));
+
+        // The CLI is its own answer, whatever is or is not beside it.
+        assert_eq!(beside(&cli), Some(cli));
     }
 
     #[test]
