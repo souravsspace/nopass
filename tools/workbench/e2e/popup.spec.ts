@@ -11,6 +11,7 @@ const LIST_CALL = /list\(\)/;
 const LOCK_CALL = /lock\(\)/;
 const HOST_INSTALL = /nopass-host install/;
 const TTL_CLOCK = /4:2\d/;
+const REFUSED = "that passphrase did not open the store";
 const DARK = /dark/;
 
 async function scenario(page: Page, label: string) {
@@ -47,6 +48,20 @@ test.describe("the popup", () => {
       popup(page).getByPlaceholder("Search your store")
     ).toBeVisible();
     await expect(popup(page).getByText("sana@example.com")).toBeVisible();
+  });
+
+  test("says why the host refused, and stays locked", async ({ page }) => {
+    await scenario(page, "Locked");
+
+    await popup(page).getByLabel("Master passphrase").fill("not the one");
+    await popup(page).getByRole("button", { name: "Unlock" }).click();
+
+    await expect(popup(page).getByRole("alert")).toHaveText(REFUSED);
+    await expect(popup(page).getByText("Your store is locked")).toBeVisible();
+
+    // The complaint is about what was typed, so it goes when that changes.
+    await popup(page).getByLabel("Master passphrase").fill("n");
+    await expect(popup(page).getByRole("alert")).toHaveCount(0);
   });
 
   test("counts the lease down rather than inventing one", async ({ page }) => {
