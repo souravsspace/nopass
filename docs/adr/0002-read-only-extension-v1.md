@@ -1,8 +1,14 @@
 # ADR-0002: The browser extension is read-only in v1
 
 **Date**: 2026-08-08
-**Status**: accepted
+**Status**: superseded in part by [ADR-0006](0006-create-only-writes-from-the-extension.md)
 **Deciders**: repository owner
+
+> ADR-0006 revisits the one line below that turned out not to hold: creating an
+> entry needs only the recipients' public keys, so it needs no passphrase and
+> no prompt. `insert` is now accepted, under a create-only gate. Everything
+> else here — every verb that reaches an entry already in the store — still
+> stands, for the reasons given.
 
 ## Context
 
