@@ -126,8 +126,8 @@ impl Session {
         if agent::get(&key).map(Zeroizing::new).is_none() {
             bail!(
                 "the passphrase was right, but the agent did not keep it: \
-                 check that a current `nopass` is on PATH and can run \
-                 `nopass agent serve`"
+                 check that a current `nopass` sits beside the host or on \
+                 PATH, and can run `nopass agent serve`"
             );
         }
         Ok(self.ttl)
