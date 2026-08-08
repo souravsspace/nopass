@@ -85,15 +85,22 @@ export function renderDropdown(root: ShadowRoot, view: DropdownView): void {
   root.append(panel);
 }
 
+/*
+ * The same warm-paper palette the popup is built on, written out by hand:
+ * a shadow root cannot see Tailwind. The bundled families are absent too —
+ * `@font-face` is document-scoped, and reaching a page's document would mean
+ * injecting a rule and a web-accessible font into every site visited. System
+ * stacks are the honest trade.
+ */
 export const DROPDOWN_STYLES = `
 :host { all: initial; }
 .np {
-  font: 13px/1.35 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: oklch(0.22 0.008 340);
-  background: oklch(0.999 0.002 340);
-  border: 1px solid oklch(0.915 0.005 340);
-  border-radius: 10px;
-  box-shadow: 0 1px 2px oklch(0.22 0.008 340 / 6%), 0 8px 24px oklch(0.22 0.008 340 / 10%);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, sans-serif;
+  color: #191919;
+  background: #ffffff;
+  border: 1px solid #e6e6e6;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(20, 20, 19, 0.07), 0 12px 32px rgba(20, 20, 19, 0.12);
   overflow: hidden;
   max-height: 264px;
   overflow-y: auto;
@@ -108,29 +115,29 @@ export const DROPDOWN_STYLES = `
   padding: 8px 12px;
   cursor: default;
 }
-.np-row + .np-row { border-top: 1px solid oklch(0.915 0.005 340 / 60%); }
-.np-row:hover, .np-row:focus-visible { background: oklch(0.955 0.019 345); }
+.np-row + .np-row { border-top: 1px solid rgba(230, 230, 230, 0.6); }
+.np-row:hover, .np-row:focus-visible { background: #f6f5f4; }
 .np-name { font-weight: 500; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-meta {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
-  color: oklch(0.541 0.014 340);
+  color: #a39e98;
   flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.np-empty { padding: 10px 12px; color: oklch(0.541 0.014 340); }
+.np-empty { padding: 10px 12px; color: #a39e98; }
 
 @media (prefers-color-scheme: dark) {
   .np {
-    color: oklch(0.955 0.003 340);
-    background: oklch(0.206 0.008 340);
-    border-color: oklch(0.955 0.003 340 / 11%);
-    box-shadow: 0 8px 24px oklch(0.08 0.006 340 / 55%);
+    color: #edecea;
+    background: #272623;
+    border-color: #33322f;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   }
-  .np-row + .np-row { border-top-color: oklch(0.955 0.003 340 / 8%); }
-  .np-row:hover, .np-row:focus-visible { background: oklch(0.297 0.036 345); }
-  .np-meta, .np-empty { color: oklch(0.706 0.014 340); }
+  .np-row + .np-row { border-top-color: #33322f; }
+  .np-row:hover, .np-row:focus-visible { background: #2b2a28; }
+  .np-meta, .np-empty { color: #84817b; }
 }
 `;
