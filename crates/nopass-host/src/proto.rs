@@ -17,14 +17,19 @@ pub const MAX_PASSWORD_LENGTH: usize = 1024;
 
 /// The verbs this host knows about. Anything else is `unsupported_verb`.
 pub const KNOWN_VERBS: &[&str] = &[
-    "hello", "status", "unlock", "lock", "list", "search", "get", "generate",
+    "hello", "status", "unlock", "lock", "list", "search", "get", "generate", "insert",
 ];
 
 /// Verbs a caller might reasonably expect but which this host refuses on
-/// principle rather than by accident (ADR-0002). Named so the refusal can say
+/// principle rather than by accident (ADR-0006). Named so the refusal can say
 /// *read-only* instead of *never heard of it*.
+///
+/// `insert` is deliberately not among them: creating an entry needs only the
+/// recipients' public keys, so it exposes no secret the browser did not
+/// already have. Everything here would rewrite, move or destroy something that
+/// is already in the store, which is the part a compromised extension must
+/// never reach.
 pub const MUTATING_VERBS: &[&str] = &[
-    "insert",
     "edit",
     "rm",
     "remove",
@@ -77,9 +82,10 @@ macro_rules! literal_bool {
 literal_bool!(Yes, true);
 literal_bool!(No, false);
 
-/// Requests. Only non-mutating verbs exist: there is deliberately no variant
-/// for `insert`, `edit`, `rm`, `mv` or `cp`, so a write cannot be expressed on
-/// this wire at all (ADR-0002).
+/// Requests. Only one mutating verb exists, and it can only ever create:
+/// there is deliberately no variant for `edit`, `rm`, `mv` or `cp`, so nothing
+/// already in the store can be rewritten, moved or destroyed over this wire
+/// (ADR-0006, superseding ADR-0002 in that one respect).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
@@ -113,6 +119,15 @@ pub enum Request {
         length: usize,
         symbols: bool,
     },
+    Insert {
+        id: u32,
+        entry: String,
+        password: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        username: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+    },
 }
 
 impl Request {
@@ -125,7 +140,8 @@ impl Request {
             | Self::List { id }
             | Self::Search { id, .. }
             | Self::Get { id, .. }
-            | Self::Generate { id, .. } => id,
+            | Self::Generate { id, .. }
+            | Self::Insert { id, .. } => id,
         }
     }
 
@@ -142,6 +158,35 @@ impl Request {
                 if !(MIN_PASSWORD_LENGTH..=MAX_PASSWORD_LENGTH).contains(length) =>
             {
                 bail!("length must be between {MIN_PASSWORD_LENGTH} and {MAX_PASSWORD_LENGTH}")
+            }
+            Self::Insert {
+                entry,
+                password,
+                username,
+                url,
+                ..
+            } => {
+                if entry.is_empty() {
+                    bail!("entry must not be empty");
+                }
+                if password.is_empty() {
+                    bail!("password must not be empty");
+                }
+                // An entry body is `password\nkey: value\n…`, so a value
+                // carrying a newline could forge a second field — a `url:`
+                // line pointing somewhere the user never typed. That is a
+                // phishing primitive, not a formatting slip, so it is refused
+                // at the edge rather than escaped further in.
+                for (field, value) in [
+                    ("password", Some(password)),
+                    ("username", username.as_ref()),
+                    ("url", url.as_ref()),
+                ] {
+                    if value.is_some_and(|v| v.contains(['\n', '\r'])) {
+                        bail!("{field} must not contain a line break");
+                    }
+                }
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -236,6 +281,13 @@ pub enum Success {
         ok: Yes,
         password: String,
     },
+    /// The name back and nothing else: the popup asked for this write, so it
+    /// already holds everything a fuller reply could tell it.
+    Insert {
+        id: u32,
+        ok: Yes,
+        entry: String,
+    },
 }
 
 /// Machine-readable failure reasons. The extension branches on the code; the
@@ -244,6 +296,11 @@ pub enum Success {
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     BadRequest,
+    /// A name already taken. Distinct from `BadRequest` because the popup
+    /// answers it by offering another name rather than by saying "that is
+    /// wrong" — and because refusing to overwrite is the whole shape of the
+    /// write this host allows (ADR-0006).
+    Exists,
     Internal,
     Locked,
     NotFound,
