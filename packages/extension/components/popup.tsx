@@ -1,20 +1,26 @@
-import type { Match } from "@nopass/protocol";
+import type { Match, Secret } from "@nopass/protocol";
 import { Button } from "@nopass/ui/components/button";
 import { Input } from "@nopass/ui/components/input";
 import { Spinner } from "@nopass/ui/components/spinner";
 import { cn } from "@nopass/ui/lib/utils";
 import {
+  ArrowLeft,
   Check,
+  ChevronRight,
   Copy,
   Database,
+  Eye,
+  EyeOff,
   Lock,
   LockOpen,
+  Plus,
   Search,
   Shield,
   Unplug,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Bridge } from "../lib/bridge";
+import { BridgeError } from "../lib/bridge";
 import { displayName, folderOf } from "../lib/dropdown";
 import type { SessionState } from "../lib/session";
 import { initialSession } from "../lib/session";
@@ -23,10 +29,21 @@ import { initialSession } from "../lib/session";
 const TOAST_MS = 2000;
 
 /**
+ * Which screen the popup is on.
+ *
+ * Only ever one at a time and never a stack: at 360 × 556 there is nowhere to
+ * go that is more than one step from the list, and a back button that
+ * sometimes means two different things is worse than no history at all.
+ */
+type View =
+  | { kind: "list" }
+  | { kind: "detail"; entry: Match }
+  | { kind: "new" };
+
+/**
  * The popup.
  *
- * 360 × 556, fixed: the list scrolls, the header and the read-only footer do
- * not. Everything the user came for — is it unlocked, for how much longer,
+ * 360 × 556, fixed: the list scrolls, the header and the footer do not. Everything the user came for — is it unlocked, for how much longer,
  * what matches this page, fill it — is on screen without scrolling.
  *
  * Two sections, and they are two different verbs. "This page" is `search`.
@@ -44,6 +61,7 @@ export function Popup({ bridge }: { bridge: Bridge }) {
   const [refused, setRefused] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [remaining, setRemaining] = useState(0);
+  const [view, setView] = useState<View>({ kind: "list" });
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -75,6 +93,9 @@ export function Popup({ bridge }: { bridge: Bridge }) {
     if (state.status !== "unlocked") {
       setMatches([]);
       setOthers([]);
+      // A screen that outlived the lease would sit there holding a secret it
+      // is no longer entitled to fetch again.
+      setView({ kind: "list" });
       return;
     }
 
@@ -204,13 +225,33 @@ export function Popup({ bridge }: { bridge: Bridge }) {
     setMatches([]);
     setOthers([]);
     setRemaining(0);
+    setView({ kind: "list" });
   };
 
+  const onSaved = useCallback(
+    async (name: string) => {
+      setView({ kind: "list" });
+      flash(`${displayName(name)} added.`);
+      await load();
+    },
+    [flash, load]
+  );
+
   const host = hostOf(origin);
+  const unlocked = session.status === "unlocked";
 
   return (
     <div className="flex h-[556px] w-[360px] flex-col overflow-hidden bg-popover font-sans text-foreground">
-      <Header onLock={onLock} remaining={remaining} session={session} />
+      <Header
+        onLock={onLock}
+        onNew={
+          unlocked && view.kind === "list"
+            ? () => setView({ kind: "new" })
+            : null
+        }
+        remaining={remaining}
+        session={session}
+      />
 
       {session.status === "connecting" && <Connecting />}
       {session.status === "unavailable" && (
@@ -227,7 +268,7 @@ export function Popup({ bridge }: { bridge: Bridge }) {
         />
       )}
 
-      {session.status === "unlocked" && (
+      {unlocked && view.kind === "list" && (
         <>
           <div className="relative flex-none border-b px-3 py-2.5">
             <Search className="absolute top-1/2 left-6 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -250,12 +291,37 @@ export function Popup({ bridge }: { bridge: Bridge }) {
             onCopy={onCopy}
             onFill={onFill}
             onHover={setCursor}
+            onOpen={(entry) => setView({ entry, kind: "detail" })}
             others={visibleOthers}
           />
         </>
       )}
 
-      <Footer toast={toast} unlocked={session.status === "unlocked"} />
+      {unlocked && view.kind === "detail" && (
+        <Detail
+          bridge={bridge}
+          entry={view.entry}
+          onBack={() => setView({ kind: "list" })}
+          onFill={onFill}
+          onFlash={flash}
+        />
+      )}
+
+      {unlocked && view.kind === "new" && (
+        <NewLogin
+          bridge={bridge}
+          host={host}
+          onBack={() => setView({ kind: "list" })}
+          onSaved={onSaved}
+          origin={origin}
+        />
+      )}
+
+      <Footer
+        keys={unlocked && view.kind === "list"}
+        toast={toast}
+        unlocked={unlocked}
+      />
     </div>
   );
 }
@@ -285,10 +351,13 @@ function Header({
   session,
   remaining,
   onLock,
+  onNew,
 }: {
   session: SessionState;
   remaining: number;
   onLock: () => void;
+  /** Null on every screen that is not the list, so there is one way in. */
+  onNew: (() => void) | null;
 }) {
   return (
     <header className="flex flex-none items-center gap-2.5 border-b px-3.5 py-3">
@@ -298,6 +367,18 @@ function Header({
       <span className="flex-1 font-display font-medium text-[17px] leading-none tracking-[-0.01em]">
         nopass
       </span>
+
+      {onNew ? (
+        <Button
+          aria-label="New login"
+          className="size-7"
+          onClick={onNew}
+          size="icon"
+          variant="ghost"
+        >
+          <Plus className="size-4" />
+        </Button>
+      ) : null}
 
       {/* Fill vs outline, plus the word or the clock: never hue on its own. */}
       {session.status === "unlocked" ? (
@@ -505,6 +586,7 @@ function EntryList({
   onFill,
   onCopy,
   onHover,
+  onOpen,
 }: {
   matches: Match[];
   others: Match[];
@@ -513,6 +595,7 @@ function EntryList({
   onFill: (entry: Match) => Promise<void>;
   onCopy: (entry: Match) => Promise<void>;
   onHover: (index: number) => void;
+  onOpen: (entry: Match) => void;
 }) {
   const row = (entry: Match, index: number) => (
     <EntryRow
@@ -523,6 +606,7 @@ function EntryList({
       onCopy={onCopy}
       onFill={onFill}
       onHover={onHover}
+      onOpen={onOpen}
     />
   );
 
@@ -610,6 +694,7 @@ function EntryRow({
   onFill,
   onCopy,
   onHover,
+  onOpen,
 }: {
   entry: Match;
   index: number;
@@ -617,6 +702,7 @@ function EntryRow({
   onFill: (entry: Match) => Promise<void>;
   onCopy: (entry: Match) => Promise<void>;
   onHover: (index: number) => void;
+  onOpen: (entry: Match) => void;
 }) {
   const selected = cursor === index;
   const folder = folderOf(entry.name);
@@ -664,6 +750,18 @@ function EntryRow({
         <Copy className="size-3.5" />
       </Button>
 
+      {/* Its own control rather than the row itself: clicking a row fills,
+          which is what the popup is opened for nine times out of ten. */}
+      <Button
+        aria-label={`View ${entry.name}`}
+        className="size-7 flex-none"
+        onClick={() => onOpen(entry)}
+        size="icon"
+        variant="ghost"
+      >
+        <ChevronRight className="size-3.5" />
+      </Button>
+
       {selected && (
         <Button
           aria-label={`Fill ${entry.name} into the page`}
@@ -679,21 +777,417 @@ function EntryRow({
   );
 }
 
+/** The bar every screen that is not the list sits under. */
+function SubHeader({
+  title,
+  meta,
+  onBack,
+}: {
+  title: string;
+  meta?: string;
+  onBack: () => void;
+}) {
+  return (
+    <div className="flex flex-none items-center gap-2 border-b px-2 py-2">
+      <Button
+        aria-label="Back"
+        className="size-7 flex-none"
+        onClick={onBack}
+        size="icon"
+        variant="ghost"
+      >
+        <ArrowLeft className="size-4" />
+      </Button>
+      <div className="min-w-0 flex-1">
+        <span className="block truncate font-semibold text-[13px]">
+          {title}
+        </span>
+        {meta ? (
+          <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
+            {meta}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** One labelled value, with the copy button that is the point of showing it. */
+function DetailField({
+  label,
+  value,
+  secret = false,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  secret?: boolean;
+  onCopy: () => void;
+}) {
+  const [shown, setShown] = useState(false);
+  const masked = secret && !shown;
+  const display = masked ? "••••••••••••" : value;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.06em]">
+        {label}
+      </span>
+      <div className="flex items-center gap-1.5 rounded-md border bg-muted px-2.5 py-2">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-[12px]",
+            secret && "font-mono"
+          )}
+          data-secret={secret ? "" : undefined}
+        >
+          {display}
+        </span>
+        {secret ? (
+          <Button
+            aria-label={shown ? `Hide the ${label}` : `Show the ${label}`}
+            className="size-6 flex-none"
+            onClick={() => setShown((was) => !was)}
+            size="icon"
+            variant="ghost"
+          >
+            {shown ? (
+              <EyeOff className="size-3.5" />
+            ) : (
+              <Eye className="size-3.5" />
+            )}
+          </Button>
+        ) : null}
+        <Button
+          aria-label={`Copy the ${label}`}
+          className="size-6 flex-none"
+          onClick={onCopy}
+          size="icon"
+          variant="ghost"
+        >
+          <Copy className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One entry, in full.
+ *
+ * Opening this screen is a `get`, because a row from "All items" carries
+ * nothing but a name — `list` never returns a field. The password arrives with
+ * it but stays masked until asked for: what the popup holds and what is on
+ * screen over someone's shoulder are two different things.
+ */
+function Detail({
+  bridge,
+  entry,
+  onBack,
+  onFill,
+  onFlash,
+}: {
+  bridge: Bridge;
+  entry: Match;
+  onBack: () => void;
+  onFill: (entry: Match) => Promise<void>;
+  onFlash: (note: string) => void;
+}) {
+  const [secret, setSecret] = useState<Secret | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    bridge
+      .reveal(entry.name)
+      .then((found) => {
+        if (live) {
+          setSecret(found);
+        }
+      })
+      .catch((error: unknown) => {
+        if (live) {
+          setFailed(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [bridge, entry.name]);
+
+  const copy = (label: string, value: string) => {
+    void navigator.clipboard.writeText(value);
+    onFlash(`${label} copied.`);
+  };
+
+  return (
+    <>
+      <SubHeader
+        meta={folderOf(entry.name) ?? entry.name}
+        onBack={onBack}
+        title={displayName(entry.name)}
+      />
+
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3.5 py-3.5">
+        {failed !== null && (
+          <p className="text-[12px] text-warning leading-normal" role="alert">
+            {failed}
+          </p>
+        )}
+
+        {secret === null && failed === null && (
+          <div className="flex flex-1 items-center justify-center">
+            <Spinner className="size-4 text-muted-foreground" />
+          </div>
+        )}
+
+        {secret === null ? null : (
+          <>
+            {secret.username ? (
+              <DetailField
+                label="Username"
+                onCopy={() => copy("Username", secret.username ?? "")}
+                value={secret.username}
+              />
+            ) : null}
+            <DetailField
+              label="Password"
+              onCopy={() => copy("Password", secret.password)}
+              secret
+              value={secret.password}
+            />
+            {secret.url ? (
+              <DetailField
+                label="URL"
+                onCopy={() => copy("URL", secret.url ?? "")}
+                value={secret.url}
+              />
+            ) : null}
+            {secret.totp ? (
+              <DetailField
+                label="TOTP"
+                onCopy={() => copy("TOTP", secret.totp ?? "")}
+                secret
+                value={secret.totp}
+              />
+            ) : null}
+
+            <Button
+              className="mt-1 w-full font-semibold"
+              onClick={() => void onFill(entry)}
+              type="button"
+            >
+              Fill this page
+            </Button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * A new login.
+ *
+ * The one screen that changes the store. It can only ever create: a name
+ * already taken comes back from the host as `exists` and is shown against the
+ * name field, rather than replacing what is there (ADR-0006).
+ */
+function NewLogin({
+  bridge,
+  host,
+  onBack,
+  onSaved,
+  origin,
+}: {
+  bridge: Bridge;
+  host: string | null;
+  onBack: () => void;
+  onSaved: (entry: string) => Promise<void>;
+  origin: string | null;
+}) {
+  const [name, setName] = useState(host ? `web/${host}` : "");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [url, setUrl] = useState(origin ?? "");
+  const [shown, setShown] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const [taken, setTaken] = useState(false);
+
+  const onSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setRefused(null);
+    setTaken(false);
+    try {
+      // Omitted rather than sent empty: the host writes no line for a field
+      // it was not given, so a blank one leaves no `url:` in the file at all.
+      const saved = await bridge.save({
+        entry: name.trim(),
+        password,
+        ...(url.trim() ? { url: url.trim() } : {}),
+        ...(username.trim() ? { username: username.trim() } : {}),
+      });
+      await onSaved(saved);
+    } catch (error) {
+      setTaken(error instanceof BridgeError && error.code === "exists");
+      setRefused(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <SubHeader onBack={onBack} title="New login" />
+
+      <form
+        className="flex flex-1 flex-col gap-3 overflow-y-auto px-3.5 py-3.5"
+        onSubmit={onSubmit}
+      >
+        <Field
+          hint="Where it lands in the store. A name ending in the site's host is what makes it match."
+          id="np-name"
+          invalid={taken}
+          label="Name"
+          onChange={setName}
+          placeholder="web/example.com"
+          value={name}
+        />
+        <Field
+          id="np-username"
+          label="Email or username"
+          onChange={setUsername}
+          placeholder="you@example.com"
+          value={username}
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            className="font-medium text-[12px] text-muted-foreground"
+            htmlFor="np-new-password"
+          >
+            Password
+          </label>
+          <div className="relative">
+            <Input
+              className="pr-9"
+              data-secret
+              id="np-new-password"
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="••••••••••••"
+              type={shown ? "text" : "password"}
+              value={password}
+            />
+            <Button
+              aria-label={shown ? "Hide the password" : "Show the password"}
+              className="absolute top-1/2 right-1 size-7 -translate-y-1/2"
+              onClick={() => setShown((was) => !was)}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              {shown ? (
+                <EyeOff className="size-3.5" />
+              ) : (
+                <Eye className="size-3.5" />
+              )}
+            </Button>
+          </div>
+        </div>
+
+        <Field
+          id="np-url"
+          label="Website"
+          onChange={setUrl}
+          placeholder="https://example.com"
+          value={url}
+        />
+
+        {refused !== null && (
+          <p className="text-[12px] text-warning leading-normal" role="alert">
+            {refused}
+          </p>
+        )}
+
+        <Button
+          className="mt-1 w-full font-semibold"
+          disabled={busy || !name.trim() || !password}
+          type="submit"
+        >
+          {busy ? <Spinner className="size-4" /> : "Save to store"}
+        </Button>
+
+        <p className="text-[11px] text-muted-foreground leading-normal">
+          Encrypted to your store's public key. Changing or removing an entry
+          still happens in a terminal.
+        </p>
+      </form>
+    </>
+  );
+}
+
+function Field({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  invalid = false,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+  hint?: string;
+  invalid?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label
+        className="font-medium text-[12px] text-muted-foreground"
+        htmlFor={id}
+      >
+        {label}
+      </label>
+      <Input
+        aria-invalid={invalid}
+        id={id}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        value={value}
+      />
+      {hint ? (
+        <span className="text-[11px] text-muted-foreground leading-normal">
+          {hint}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function Footer({
   toast,
   unlocked,
+  keys,
 }: {
   toast: string | null;
   unlocked: boolean;
+  /** The arrow-key hint only means anything on the list. */
+  keys: boolean;
 }) {
   return (
     <div className="relative flex flex-none items-center gap-2 border-t bg-muted px-3 py-2">
       <Shield className="size-3.5 flex-none text-muted-foreground" />
       <span className="flex-1 text-[11px] text-muted-foreground leading-tight">
-        Read-only. Add logins with{" "}
-        <code className="font-mono">nopass insert</code>.
+        {unlocked
+          ? "Adds new logins. Changing or removing one is a terminal job."
+          : "Reads your local store. It never changes an entry it did not create."}
       </span>
-      {unlocked ? (
+      {keys ? (
         <span className="font-mono text-[11px] text-muted-foreground">
           ↑↓ ↵
         </span>
