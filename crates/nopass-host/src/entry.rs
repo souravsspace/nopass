@@ -18,6 +18,31 @@ const USERNAME_KEYS: &[&str] = &["username", "user", "login", "email"];
 const URL_KEYS: &[&str] = &["url", "website", "site"];
 const TOTP_KEYS: &[&str] = &["totp", "otp", "otpauth", "otp_secret"];
 
+/// Compose an entry body the CLI would have written.
+///
+/// The password is the first line and the rest are `key: value`, using the
+/// first spelling from each list above so a hand-written store and one created
+/// from the popup read the same. Empty fields are left out entirely rather
+/// than written as an empty key, because [`parse`] skips those anyway and a
+/// file full of blanks is harder to edit by hand.
+///
+/// Values are trusted to hold no line break — `Request::validate` refuses one
+/// on the wire, which is where a forged second field has to be stopped.
+pub fn render(password: &str, username: Option<&str>, url: Option<&str>) -> String {
+    let mut body = String::with_capacity(password.len() + 64);
+    body.push_str(password);
+    body.push('\n');
+    for (key, value) in [("username", username), ("url", url)] {
+        if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+            body.push_str(key);
+            body.push_str(": ");
+            body.push_str(value.trim());
+            body.push('\n');
+        }
+    }
+    body
+}
+
 pub fn parse(body: &str) -> Fields {
     let mut lines = body.lines();
     let mut fields = Fields {
@@ -117,6 +142,23 @@ mod tests {
             parse("pw\nuser: first\nuser: second\n").username.as_deref(),
             Some("first")
         );
+    }
+
+    #[test]
+    fn what_is_rendered_parses_back_to_what_went_in() {
+        let body = render("hunter2", Some("sana@example.com"), Some("https://a.b"));
+        assert_eq!(body, "hunter2\nusername: sana@example.com\nurl: https://a.b\n");
+
+        let fields = parse(&body);
+        assert_eq!(fields.password, "hunter2");
+        assert_eq!(fields.username.as_deref(), Some("sana@example.com"));
+        assert_eq!(fields.url.as_deref(), Some("https://a.b"));
+    }
+
+    #[test]
+    fn a_field_nobody_filled_in_is_left_out_rather_than_written_empty() {
+        assert_eq!(render("hunter2", None, None), "hunter2\n");
+        assert_eq!(render("hunter2", Some("   "), None), "hunter2\n");
     }
 
     #[test]
