@@ -83,14 +83,26 @@ fn responses_match_the_fixtures() {
 }
 
 #[test]
-fn no_mutating_verb_can_be_expressed_on_this_wire() {
-    for verb in [
-        "insert", "edit", "rm", "mv", "cp", "delete", "remove", "init",
-    ] {
+fn no_verb_that_could_reach_an_existing_entry_can_be_expressed_on_this_wire() {
+    for verb in ["edit", "rm", "mv", "cp", "delete", "remove", "init"] {
         let json = serde_json::json!({ "id": 1, "verb": verb, "entry": "web/example.com" });
         assert!(
             proto::parse_request(&json).is_err(),
-            "{verb} must not parse: the host is read-only (ADR-0002)"
+            "{verb} must not parse: the host may create but never rewrite (ADR-0006)"
         );
     }
+
+    // `insert` does parse — and it carries no field that could name a second
+    // entry, so there is no shape of it that reaches one already there.
+    let json = serde_json::json!({
+        "id": 1,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "password": "hunter2",
+        "from": "web/github.com",
+    });
+    assert!(
+        proto::parse_request(&json).is_err(),
+        "an insert carrying an extra field must not parse"
+    );
 }
