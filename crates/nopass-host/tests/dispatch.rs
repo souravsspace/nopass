@@ -1,6 +1,9 @@
 //! What the host does with a well-formed request, and what it refuses.
 
+use nopass_core::crypto::generate_identity_locked;
+use nopass_core::lock::SecretString;
 use nopass_core::{PlainCrypto, Store};
+use nopass_host::session::Session;
 use nopass_host::{proto, Host};
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -33,7 +36,22 @@ fn sample() -> (TempDir, Host) {
         ("web/github.com", "octocat-pw\nusername: sana\n"),
         ("mail/fastmail", "fm-pw\n"),
     ]);
-    (dir, Host::new(store))
+    let session = Session::new(dir.path().join("identity.txt"));
+    (dir, Host::with_session(store, session))
+}
+
+/// The same store, but behind an identity that really is locked.
+///
+/// `Session::default()` would read the identity of whoever is running the
+/// tests, so a lock-state assertion made against it would pass or fail
+/// depending on whether that person happened to have unlocked their own store.
+/// This one is a throwaway locked file nothing holds the passphrase for.
+fn sample_locked() -> (TempDir, Host) {
+    let (dir, store) = store_with(&[("web/github.com", "octocat-pw\nusername: sana\n")]);
+    let identity = dir.path().join("identity.txt");
+    generate_identity_locked(&identity, &SecretString::from("correct-horse".to_owned()))
+        .expect("a locked identity is written");
+    (dir, Host::with_session(store, Session::new(identity)))
 }
 
 /// Every reply the host emits must itself satisfy the published schema.
@@ -211,7 +229,10 @@ fn a_mutating_verb_is_refused_and_changes_nothing() {
     let (_dir, mut host) = sample();
     let before = reply(&mut host, json!({ "id": 13, "verb": "list" }));
 
-    for verb in ["insert", "edit", "rm", "mv", "cp", "delete", "init"] {
+    // `insert` is deliberately absent: it is the one write this host performs,
+    // and it can only ever create (ADR-0006). Everything here would reach
+    // something already in the store.
+    for verb in ["edit", "rm", "mv", "cp", "delete", "init"] {
         let response = reply(
             &mut host,
             json!({ "id": 14, "verb": verb, "entry": "web/google.com", "password": "owned" }),
@@ -226,6 +247,116 @@ fn a_mutating_verb_is_refused_and_changes_nothing() {
 
     let after = reply(&mut host, json!({ "id": 15, "verb": "list" }));
     assert_eq!(before["entries"], after["entries"]);
+}
+
+#[test]
+fn insert_creates_an_entry_the_next_get_can_read_back() {
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 20,
+            "verb": "insert",
+            "entry": "web/example.com",
+            "password": "hunter2",
+            "username": "sana@example.com",
+            "url": "https://example.com/login",
+        }),
+    );
+    assert_eq!(response["ok"], json!(true));
+    assert_eq!(response["entry"], json!("web/example.com"));
+
+    // Written in the shape the CLI writes, so `nopass show` and the popup
+    // agree about what is in the file.
+    let got = reply(
+        &mut host,
+        json!({ "id": 21, "verb": "get", "entry": "web/example.com" }),
+    );
+    assert_eq!(got["entry"]["password"], json!("hunter2"));
+    assert_eq!(got["entry"]["username"], json!("sana@example.com"));
+    assert_eq!(got["entry"]["url"], json!("https://example.com/login"));
+
+    // And it is a real entry, not just a readable file.
+    let names = reply(&mut host, json!({ "id": 22, "verb": "list" }));
+    assert!(
+        names["entries"]
+            .as_array()
+            .expect("list returns an array")
+            .contains(&json!("web/example.com")),
+        "{names}"
+    );
+}
+
+#[test]
+fn insert_refuses_a_name_that_is_already_taken_rather_than_overwriting_it() {
+    // The whole reason this verb is safe to expose: a compromised extension
+    // must not be able to replace a login with one it knows (ADR-0006).
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 23,
+            "verb": "insert",
+            "entry": "web/github.com",
+            "password": "owned",
+        }),
+    );
+    assert_eq!(response["ok"], json!(false));
+    assert_eq!(error_code(&response), "exists");
+
+    let got = reply(
+        &mut host,
+        json!({ "id": 24, "verb": "get", "entry": "web/github.com" }),
+    );
+    assert_eq!(
+        got["entry"]["password"],
+        json!("octocat-pw"),
+        "the original password must survive a refused insert"
+    );
+}
+
+#[test]
+fn insert_is_refused_while_the_store_is_locked() {
+    let (_dir, mut host) = sample_locked();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 25,
+            "verb": "insert",
+            "entry": "web/example.com",
+            "password": "hunter2",
+        }),
+    );
+    assert_eq!(response["ok"], json!(false));
+    assert_eq!(error_code(&response), "locked");
+
+    let names = reply(&mut host, json!({ "id": 26, "verb": "list" }));
+    assert!(
+        !names["entries"]
+            .as_array()
+            .expect("list returns an array")
+            .contains(&json!("web/example.com")),
+        "a locked store must not have gained an entry: {names}"
+    );
+}
+
+#[test]
+fn a_line_break_in_a_field_cannot_forge_a_second_one() {
+    // `url:` on its own line is what the popup and the dropdown match on, so
+    // a password free to carry one could point a future fill at a site the
+    // user never typed.
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 27,
+            "verb": "insert",
+            "entry": "web/example.com",
+            "password": "hunter2\nurl: https://phish.example",
+        }),
+    );
+    assert_eq!(response["ok"], json!(false));
+    assert_eq!(error_code(&response), "bad_request");
 }
 
 #[test]
