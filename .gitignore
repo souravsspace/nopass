@@ -16,3 +16,7 @@ coverage/
 playwright-report/
 test-results/
 /playwright/.cache/
+
+# The generated knowledge graph. Rebuilt from the source, never edited.
+graphify-out/
+.graphify-vault/
