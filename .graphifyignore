@@ -1,0 +1,20 @@
+# What the knowledge graph must not treat as this codebase.
+# Same syntax as .gitignore. graphify already skips node_modules, target,
+# dist, build and the usual caches.
+
+# Vendored upstream password-store, kept only for reference. nopass is a
+# clean-room rewrite and shares no lineage with it; graphing it would invent
+# relationships this project does not have.
+tmp/
+
+# WXT build output and generated types.
+.output/
+.wxt/
+
+# Playwright artefacts.
+playwright-report/
+test-results/
+
+# The graph's own output, and the nix build symlink.
+graphify-out/
+result
