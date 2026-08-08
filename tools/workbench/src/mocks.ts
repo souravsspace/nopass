@@ -6,7 +6,7 @@
  * state the extension can actually be in.
  */
 
-import type { Bridge } from "@nopass/extension/lib/bridge";
+import { type Bridge, BridgeError } from "@nopass/extension/lib/bridge";
 import type { SessionState } from "@nopass/extension/lib/session";
 import type { Match, Secret } from "@nopass/protocol";
 
@@ -32,6 +32,13 @@ export const ENTRIES: Secret[] = [
   },
 ];
 
+/**
+ * The one passphrase this fake store opens for. A refusal is reachable here
+ * the same way it is in the browser — by typing the wrong thing — rather than
+ * through a scenario button the extension does not have.
+ */
+export const PASSPHRASE = "correct horse battery staple";
+
 /** The states worth being able to look at without reproducing them by hand. */
 export type Scenario =
   | "unlocked"
@@ -44,7 +51,11 @@ export type Scenario =
 export const SCENARIOS: { id: Scenario; label: string; note: string }[] = [
   { id: "unlocked", label: "Unlocked", note: "Entries for the current site" },
   { id: "empty", label: "No matches", note: "Unlocked, nothing for this site" },
-  { id: "locked", label: "Locked", note: "Passphrase needed" },
+  {
+    id: "locked",
+    label: "Locked",
+    note: `Opens for "${PASSPHRASE}"; anything else is refused`,
+  },
   { id: "no-store", label: "No store", note: "Before nopass init" },
   {
     id: "unavailable",
@@ -127,6 +138,11 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
     },
     unlock(passphrase: string) {
       log(`unlock(${"•".repeat(passphrase.length)})`);
+      if (passphrase !== PASSPHRASE) {
+        return Promise.reject(
+          new BridgeError("locked", "that passphrase did not open the store")
+        );
+      }
       state = { expiresIn: 300, status: "unlocked" };
       return Promise.resolve(state);
     },
