@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use nopass_core::lock::{decrypt_slot, LockedIdentity, SecretString, Unlocker};
 use nopass_core::{agent, config, crypto, Error as CoreError, Result as CoreResult};
 use sha2::{Digest, Sha256};
@@ -85,22 +85,51 @@ impl Session {
 
     /// Open the passphrase slot and hand the result to the agent. Returns how
     /// long it will be held for.
+    ///
+    /// The agent is the only place this unlock can live — the host keeps no
+    /// cache and exits with the port — so a lease that is not stored is a
+    /// lease that does not exist, and every read after it would be told the
+    /// store is locked. Both ways of failing to store one are reported here
+    /// rather than answered with an unlocked state that undoes itself on the
+    /// next request.
     pub fn unlock(&self, passphrase: &str) -> Result<u64> {
         let Some(locked) = self.locked() else {
             // Nothing is locked, so the passphrase was not needed.
             return Ok(0);
         };
 
+        if self.ttl == 0 {
+            bail!(
+                "the passphrase cache is off, so an unlock could not be held: \
+                 set `cache-ttl` to a number of seconds in {}",
+                config::default_config_file().display()
+            );
+        }
+
         let slot = locked
             .passphrase_slot
             .as_ref()
             .context("this identity has no passphrase slot to open")?;
 
-        let secret = Zeroizing::new(decrypt_slot(
-            slot,
-            &SecretString::from(passphrase.to_owned()),
-        )?);
-        agent::put(&cache_key(&locked), &secret, self.ttl);
+        // Said plainly, because the popup shows this to the person typing:
+        // the cause is kept on the chain, but "Decryption failed" is not an
+        // answer to "did I get my passphrase wrong?".
+        let secret = Zeroizing::new(
+            decrypt_slot(slot, &SecretString::from(passphrase.to_owned()))
+                .context("that passphrase did not open the store")?,
+        );
+        let key = cache_key(&locked);
+        agent::put(&key, &secret, self.ttl);
+
+        // `put` is best effort by design — the CLI can simply ask again. The
+        // browser cannot, so read it back before promising a lease.
+        if agent::get(&key).map(Zeroizing::new).is_none() {
+            bail!(
+                "the passphrase was right, but the agent did not keep it: \
+                 check that a current `nopass` is on PATH and can run \
+                 `nopass agent serve`"
+            );
+        }
         Ok(self.ttl)
     }
 
