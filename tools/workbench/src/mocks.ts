@@ -93,6 +93,10 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
       log(`fill(${entry})`);
       return Promise.resolve();
     },
+    list() {
+      log("list()");
+      return Promise.resolve(ENTRIES.map((entry) => entry.name));
+    },
     lock() {
       log("lock()");
       state = { status: "locked" };
