@@ -11,6 +11,7 @@ import { browser } from "#imports";
 import type { Bridge } from "./bridge";
 import { BridgeError } from "./bridge";
 import type {
+  Draft,
   ExtensionReply,
   ExtensionSuccess,
   PopupRequest,
@@ -81,6 +82,10 @@ export function browserBridge(): Bridge {
 
     async reveal(entry: string): Promise<Secret> {
       return (await expect({ entry, kind: "reveal" }, "secret")).secret;
+    },
+
+    async save(draft: Draft): Promise<string> {
+      return (await expect({ ...draft, kind: "save" }, "saved")).entry;
     },
 
     async search(origin: string): Promise<Match[]> {
