@@ -133,6 +133,21 @@ export default defineBackground(() => {
           return { kind: "password", ok: true, password: reply.password };
         }
 
+        case "save": {
+          // The only request that changes anything. It reaches the host from
+          // the popup and from nowhere else — `ContentRequest` has no `save`,
+          // so a page's script cannot put an entry into the store even if it
+          // guessed the shape (ADR-0006).
+          const reply = await client.request({
+            entry: request.entry,
+            password: request.password,
+            url: request.url,
+            username: request.username,
+            verb: "insert",
+          });
+          return { entry: reply.entry, kind: "saved", ok: true };
+        }
+
         case "fill":
           return await fill(request.entry, request.tabId);
 
