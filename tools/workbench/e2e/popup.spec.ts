@@ -4,10 +4,13 @@ import { expect, test } from "@playwright/test";
 const popup = (page: Page): Locator => page.getByTestId("popup-surface");
 
 const FILL_GITHUB = /fill\(web\/github\.com\)/;
+const FILL_GITHUB_WORK = /fill\(web\/github\.com-work\)/;
 const ANY_REVEAL = /reveal\(/;
 const REVEAL_GITHUB = /reveal\(web\/github\.com\)/;
+const LIST_CALL = /list\(\)/;
 const LOCK_CALL = /lock\(\)/;
 const HOST_INSTALL = /nopass-host install/;
+const TTL_CLOCK = /4:2\d/;
 const DARK = /dark/;
 
 async function scenario(page: Page, label: string) {
@@ -19,8 +22,11 @@ test.describe("the popup", () => {
   test("asks for a passphrase when the store is locked", async ({ page }) => {
     await scenario(page, "Locked");
 
-    await expect(popup(page).getByText("Locked")).toBeVisible();
-    await expect(popup(page).getByLabel("Passphrase")).toBeVisible();
+    await expect(
+      popup(page).getByText("Locked", { exact: true })
+    ).toBeVisible();
+    await expect(popup(page).getByText("Your store is locked")).toBeVisible();
+    await expect(popup(page).getByLabel("Master passphrase")).toBeVisible();
     await expect(
       popup(page).getByRole("button", { name: "Unlock" })
     ).toBeDisabled();
@@ -30,32 +36,56 @@ test.describe("the popup", () => {
     await scenario(page, "Locked");
 
     await popup(page)
-      .getByLabel("Passphrase")
+      .getByLabel("Master passphrase")
       .fill("correct horse battery staple");
     await popup(page).getByRole("button", { name: "Unlock" }).click();
 
-    await expect(popup(page).getByText("Unlocked")).toBeVisible();
-    await expect(popup(page).getByPlaceholder("Search entries")).toBeVisible();
+    await expect(
+      popup(page).getByRole("button", { name: "Lock now" })
+    ).toBeVisible();
+    await expect(
+      popup(page).getByPlaceholder("Search your store")
+    ).toBeVisible();
     await expect(popup(page).getByText("sana@example.com")).toBeVisible();
+  });
+
+  test("counts the lease down rather than inventing one", async ({ page }) => {
+    await scenario(page, "Unlocked");
+
+    // The mock hands back 268 seconds; the pill renders the host's number.
+    await expect(
+      popup(page).getByRole("button", { name: "Lock now" })
+    ).toContainText(TTL_CLOCK);
   });
 
   test("never puts a passphrase on screen in clear text", async ({ page }) => {
     await scenario(page, "Locked");
 
-    const field = popup(page).getByLabel("Passphrase");
+    const field = popup(page).getByLabel("Master passphrase");
     await field.fill("hunter2");
     await expect(field).toHaveAttribute("type", "password");
+  });
+
+  test("separates this page's entries from the rest of the store", async ({
+    page,
+  }) => {
+    await scenario(page, "Unlocked");
+
+    await expect(popup(page).getByText("This page")).toBeVisible();
+    await expect(popup(page).getByText("All items")).toBeVisible();
+    // `list` is names only, and is the only reason the second section exists.
+    await expect(page.getByText(LIST_CALL)).toBeVisible();
   });
 
   test("narrows the list as you type", async ({ page }) => {
     await scenario(page, "Unlocked");
     const rows = popup(page).getByRole("listitem");
-    await expect(rows).toHaveCount(2);
+    await expect(rows).toHaveCount(4);
 
-    await popup(page).getByPlaceholder("Search entries").fill("work");
+    await popup(page).getByPlaceholder("Search your store").fill("work");
     await expect(rows).toHaveCount(1);
 
-    await popup(page).getByPlaceholder("Search entries").fill("zzzz");
+    await popup(page).getByPlaceholder("Search your store").fill("zzzz");
     await expect(rows).toHaveCount(0);
   });
 
@@ -64,6 +94,16 @@ test.describe("the popup", () => {
     await popup(page).getByText("sana@example.com").click();
 
     await expect(page.getByText(FILL_GITHUB)).toBeVisible();
+  });
+
+  test("moves with the arrow keys and fills on Enter", async ({ page }) => {
+    await scenario(page, "Unlocked");
+
+    const search = popup(page).getByPlaceholder("Search your store");
+    await search.press("ArrowDown");
+    await search.press("Enter");
+
+    await expect(page.getByText(FILL_GITHUB_WORK)).toBeVisible();
   });
 
   test("reveals a password only when asked to copy one", async ({ page }) => {
@@ -82,10 +122,10 @@ test.describe("the popup", () => {
 
   test("locks again on request", async ({ page }) => {
     await scenario(page, "Unlocked");
-    await popup(page).getByRole("button", { name: "Lock" }).click();
+    await popup(page).getByRole("button", { name: "Lock now" }).click();
 
     await expect(page.getByText(LOCK_CALL)).toBeVisible();
-    await expect(popup(page).getByLabel("Passphrase")).toBeVisible();
+    await expect(popup(page).getByLabel("Master passphrase")).toBeVisible();
   });
 
   test("says what to run when there is no store", async ({ page }) => {
