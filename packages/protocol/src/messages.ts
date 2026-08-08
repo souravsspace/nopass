@@ -20,9 +20,23 @@ const requestId = z.number().int().nonnegative();
 const entryName = z.string().min(1);
 
 /**
- * Requests. Only non-mutating verbs exist: there is deliberately no schema for
- * `insert`, `edit`, `rm`, `mv` or `cp`, so a write cannot be expressed on this
- * wire at all (ADR-0002).
+ * One line of an entry body, and never more than one.
+ *
+ * An entry is `password\nkey: value\n…`, so a value carrying a newline could
+ * forge a second field — a `url:` line pointing somewhere the user never
+ * typed, which is a phishing primitive rather than a formatting bug. Rejected
+ * at the edge on both sides of the wire (ADR-0006).
+ */
+const LINE_BREAK = /[\r\n]/;
+const oneLine = z.string().refine((value) => !LINE_BREAK.test(value), {
+  message: "must not contain a line break",
+});
+
+/**
+ * Requests. Only one mutating verb exists, and it can only ever create:
+ * there is deliberately no schema for `edit`, `rm`, `mv` or `cp`, so nothing
+ * already in the store can be rewritten, moved or destroyed over this wire
+ * (ADR-0006, superseding ADR-0002 in that one respect).
  */
 export const requestSchema = z.discriminatedUnion("verb", [
   z.object({
@@ -44,6 +58,14 @@ export const requestSchema = z.discriminatedUnion("verb", [
     verb: z.literal("search"),
   }),
   z.object({ entry: entryName, id: requestId, verb: z.literal("get") }),
+  z.object({
+    entry: entryName,
+    id: requestId,
+    password: oneLine.min(1),
+    url: oneLine.optional(),
+    username: oneLine.optional(),
+    verb: z.literal("insert"),
+  }),
   z.object({
     id: requestId,
     length: z.number().int().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
@@ -124,6 +146,14 @@ const successSchema = z.discriminatedUnion("verb", [
     password: z.string(),
     verb: z.literal("generate"),
   }),
+  // The name back and nothing else: the popup asked for this write, so it
+  // already holds everything a fuller reply could tell it.
+  z.object({
+    entry: entryName,
+    id: requestId,
+    ok: z.literal(true),
+    verb: z.literal("insert"),
+  }),
 ]);
 
 /**
@@ -132,6 +162,9 @@ const successSchema = z.discriminatedUnion("verb", [
  */
 export const errorCodeSchema = z.enum([
   "bad_request",
+  // A name already taken. Distinct from `bad_request` because the popup
+  // answers it by offering another name rather than by saying "that is wrong".
+  "exists",
   "internal",
   "locked",
   "not_found",
