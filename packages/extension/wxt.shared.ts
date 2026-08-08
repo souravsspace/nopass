@@ -15,7 +15,8 @@ export const SOURCE_DIR = fileURLToPath(new URL(".", import.meta.url));
 
 export const SHARED_MANIFEST = {
   action: { default_title: "nopass" },
-  description: "Fill logins from your local nopass store. Read-only.",
+  description:
+    "Fill logins from your local nopass store, and save new ones to it.",
   host_permissions: ["http://*/*", "https://*/*"],
   name: "nopass",
   permissions: [
