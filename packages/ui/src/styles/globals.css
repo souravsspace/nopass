@@ -25,7 +25,8 @@
 
 /*
  * The scene: someone glances at a 360px popup for two seconds, mid-login, on
- * a laptop in a bright room. Light by default; dark is honoured, not assumed.
+ * a laptop in a bright room. Which of the two below they get is the system's
+ * call, mirrored onto `.dark` by the popup's `followSystemTheme`.
  *
  * Every password manager reaches for teal, green or neon-on-black. This one
  * has no hue at all. The canvas is warm paper, cards are white on top of it,
@@ -93,6 +94,10 @@
   --sidebar-accent-foreground: #191919;
   --sidebar-border: #e6e6e6;
   --sidebar-ring: #191817;
+
+  /* Scrollbars, selection and the caret are drawn by the browser rather than
+     by us; without this they stay light on top of a dark popup. */
+  color-scheme: light;
 }
 
 .dark {
@@ -144,6 +149,8 @@
   --sidebar-accent-foreground: #edecea;
   --sidebar-border: #33322f;
   --sidebar-ring: #edecea;
+
+  color-scheme: dark;
 }
 
 @theme inline {
