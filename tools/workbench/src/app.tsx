@@ -144,9 +144,10 @@ function InlineDropdown() {
     }
     renderDropdown(root, {
       kind: "matches",
-      matches: ENTRIES.slice(0, 3).map(({ name, username }) => ({
-        name,
-        username,
+      matches: ENTRIES.slice(0, 3).map((entry) => ({
+        kind: entry.kind,
+        name: entry.name,
+        username: entry.fields.find((field) => field.key === "username")?.value,
       })),
       onPick: () => undefined,
     });
