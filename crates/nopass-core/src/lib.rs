@@ -6,6 +6,7 @@ pub mod agent;
 pub mod config;
 pub mod crypto;
 pub mod error;
+pub mod fields;
 pub mod generate;
 pub mod git;
 pub mod lock;
