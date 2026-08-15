@@ -7,7 +7,10 @@ function shadow(): ShadowRoot {
   return host.attachShadow({ mode: "open" });
 }
 
-function view(root: ShadowRoot, over: Partial<Parameters<typeof renderSavePrompt>[1]> = {}) {
+function view(
+  root: ShadowRoot,
+  over: Partial<Parameters<typeof renderSavePrompt>[1]> = {}
+) {
   renderSavePrompt(root, {
     host: "github.com",
     onDismiss: () => undefined,
