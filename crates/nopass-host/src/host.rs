@@ -217,10 +217,14 @@ impl Host {
     /// Entries that may be offered on `origin`.
     ///
     /// Names are matched first, which is both the `web/google.com` convention
-    /// and the only thing that works on a locked store. A match is then
-    /// decrypted to fill in the username the popup wants to show; if that
-    /// fails the row is still offered, because knowing an entry exists is not
-    /// a secret the way its password is.
+    /// and the only thing that works on a locked store. The body is then read
+    /// for the username the popup shows, and for the `url:` line, which is
+    /// matched too: an entry filed under a name that says nothing about the
+    /// host — `work/mail`, with `url: https://mail.google.com` — is the case
+    /// the name rule alone silently drops, and the popup already tells users
+    /// that line is what makes a fill happen. A body that will not decrypt
+    /// leaves the row offered on its name, because knowing an entry exists is
+    /// not a secret the way its password is.
     fn search(&self, id: u32, origin: &str) -> Value {
         let Some(page_host) = origin::host_of(origin) else {
             return proto::success(Success::Search {
@@ -237,26 +241,38 @@ impl Host {
 
         let matches = names
             .into_iter()
-            .filter(|name| {
-                origin::matches(
+            .filter_map(|name| {
+                let by_name = origin::matches(
                     &Candidate {
                         name: name.clone(),
                         url: None,
                     },
                     &page_host,
-                )
-            })
-            .map(|name| {
+                );
                 let fields = self
                     .store
                     .show(&name)
                     .ok()
                     .map(|body| entry::parse(&String::from_utf8_lossy(&body)));
-                Match {
-                    name,
-                    username: fields.as_ref().and_then(|f| f.username.clone()),
-                    url: fields.and_then(|f| f.url),
+                let url = fields.as_ref().and_then(|f| f.url.clone());
+
+                let by_url = url.is_some()
+                    && origin::matches(
+                        &Candidate {
+                            name: name.clone(),
+                            url: url.clone(),
+                        },
+                        &page_host,
+                    );
+                if !(by_name || by_url) {
+                    return None;
                 }
+
+                Some(Match {
+                    name,
+                    username: fields.and_then(|f| f.username),
+                    url,
+                })
             })
             .collect();
 
