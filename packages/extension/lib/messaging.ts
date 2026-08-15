@@ -8,15 +8,29 @@
  * one fill, and nothing else.
  */
 
-import type { Match, Secret } from "@nopass/protocol";
+import type { Field, Item, Kind, Match, Secret } from "@nopass/protocol";
 import type { SessionState } from "./session";
 
-/** A new login on its way to the store. Never carries an existing name. */
+/** A new entry on its way to the store. Never carries an existing name. */
 export interface Draft {
   entry: string;
-  password: string;
-  url?: string;
-  username?: string;
+  fields?: Field[];
+  kind?: Kind;
+  /** The first line: a password, a card number, absent for an identity. */
+  secret?: string;
+}
+
+/**
+ * A change to an entry that is already there.
+ *
+ * Only the fields named are touched, and an empty value clears one; every
+ * other line of the entry — including a field this build has never heard of —
+ * is left where it is by the host (ADR-0009).
+ */
+export interface Patch {
+  entry: string;
+  fields?: Field[];
+  secret?: string;
 }
 
 export type PopupRequest =
@@ -28,6 +42,8 @@ export type PopupRequest =
   | { kind: "reveal"; entry: string }
   | { kind: "generate"; length: number; symbols: boolean }
   | ({ kind: "save" } & Draft)
+  | ({ kind: "update" } & Patch)
+  | { kind: "items"; kinds?: Kind[] }
   | { kind: "fill"; entry: string; tabId: number };
 
 /**
@@ -41,6 +57,13 @@ export type ContentRequest =
   | { kind: "session" }
   | { kind: "matches"; origin: string }
   | { kind: "fillHere"; entry: string }
+  /**
+   * The cards and identities on offer, as rows and never as secrets. A
+   * content script may ask for these two kinds and no others: they belong to
+   * no site, so `search` cannot reach them, and enumerating logins is what
+   * this vocabulary exists to prevent.
+   */
+  | { kind: "wallet" }
   | ({ kind: "captured"; origin: string } & Captured)
   | { kind: "saveCaptured"; entry: string }
   | { kind: "dismissCaptured" };
@@ -73,6 +96,7 @@ export type ExtensionSuccess =
   | { ok: true; kind: "secret"; secret: Secret }
   | { ok: true; kind: "password"; password: string }
   | { ok: true; kind: "saved"; entry: string }
+  | { ok: true; kind: "items"; items: Item[] }
   | { ok: true; kind: "offer"; offer: SaveOffer | null }
   | { ok: true; kind: "done" };
 
