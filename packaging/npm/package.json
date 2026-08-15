@@ -16,7 +16,7 @@
     "url": "git+https://github.com/souravsspace/nopass.git",
     "directory": "packaging/npm"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "author": "Sourav <souravsspace@gmail.com>",
   "bin": {
     "nopass": "bin/nopass"
