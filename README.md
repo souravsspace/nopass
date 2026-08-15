@@ -512,7 +512,8 @@ against a plaintext test backend, native-crypto tests use throwaway
 identities in temp dirs, and sync tests push to local bare repos.
 
 Patches welcome — [CONTRIBUTING.md](CONTRIBUTING.md) covers the layout, the
-test harnesses, and the house rules.
+test harnesses, and the house rules. [diagram.md](diagram.md) is the system
+architecture in diagrams: every component, boundary and decision on one page.
 
 ## License
 
