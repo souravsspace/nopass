@@ -1,9 +1,12 @@
 import { PROTOCOL_VERSION } from "@nopass/protocol";
 import { browser, defineBackground } from "#imports";
+import { suggestedName } from "../lib/capture";
 import type {
+  Captured,
   ExtensionReply,
   ExtensionRequest,
   FillCommand,
+  SaveOffer,
 } from "../lib/messaging";
 import { failure } from "../lib/messaging";
 import type { NativePort } from "../lib/native";
@@ -20,6 +23,16 @@ export default defineBackground(() => {
   );
 
   let session: SessionState = initialSession();
+
+  /**
+   * Logins that have been submitted and not yet answered for, by tab.
+   *
+   * The password sits here rather than in the page while the prompt is up, so
+   * the message that accepts the offer carries a name and nothing else. It is
+   * memory only: nothing is written until the user says a name, and closing
+   * the tab throws it away (ADR-0007).
+   */
+  const offered = new Map<number, Captured & { origin: string }>();
 
   const setSession = (next: SessionState) => {
     session = next;
@@ -63,10 +76,39 @@ export default defineBackground(() => {
     return session;
   };
 
+  /*
+   * `sendResponse` and a literal `true`, rather than returning the promise.
+   *
+   * Returning a promise from a message listener is a Gecko extension that
+   * Chromium has never implemented: there, the channel closes the moment this
+   * listener returns and every caller resolves with `undefined`, which is why
+   * nothing the popup or the content script asked for ever came back. `true`
+   * says the answer is coming later, and both engines understand it.
+   */
   browser.runtime.onMessage.addListener(
-    (message: unknown, sender): Promise<ExtensionReply> =>
-      handle(message as ExtensionRequest, sender.tab?.id)
+    (
+      message: unknown,
+      sender,
+      sendResponse: (reply: ExtensionReply) => void
+    ) => {
+      handle(message as ExtensionRequest, sender.tab?.id).then(
+        sendResponse,
+        (error: unknown) =>
+          sendResponse(
+            failure(
+              "internal",
+              error instanceof Error ? error.message : String(error)
+            )
+          )
+      );
+      return true;
+    }
   );
+
+  // A tab that goes away takes its unanswered offer with it.
+  browser.tabs.onRemoved.addListener((tabId) => {
+    offered.delete(tabId);
+  });
 
   async function handle(
     request: ExtensionRequest,
@@ -148,6 +190,15 @@ export default defineBackground(() => {
           return { entry: reply.entry, kind: "saved", ok: true };
         }
 
+        case "captured":
+        case "saveCaptured":
+        case "dismissCaptured":
+          // The tab id comes from the sender, so a tab can only ever offer,
+          // name or drop its own login (ADR-0007).
+          return senderTabId === undefined
+            ? failure("bad_request", "no tab offered this login")
+            : await captured(request, senderTabId);
+
         case "fill":
           return await fill(request.entry, request.tabId);
 
@@ -173,6 +224,85 @@ export default defineBackground(() => {
     }
   }
 
+  /** The three steps of a login the user was asked about after signing in. */
+  async function captured(
+    request: Extract<
+      ExtensionRequest,
+      { kind: "captured" | "dismissCaptured" | "saveCaptured" }
+    >,
+    tabId: number
+  ): Promise<ExtensionReply> {
+    if (request.kind === "dismissCaptured") {
+      offered.delete(tabId);
+      return { kind: "done", ok: true };
+    }
+
+    if (request.kind === "captured") {
+      return await offer(tabId, request.origin, {
+        password: request.password,
+        ...(request.username ? { username: request.username } : {}),
+      });
+    }
+
+    // Only the name travels. The password is the one this tab reported when
+    // the form was submitted, so accepting an offer can never save something
+    // the user did not just type into that page (ADR-0007).
+    const held = offered.get(tabId);
+    if (!held) {
+      return failure("bad_request", "there is no login to save");
+    }
+
+    const reply = await client.request({
+      entry: request.entry,
+      password: held.password,
+      url: held.origin,
+      verb: "insert",
+      ...(held.username ? { username: held.username } : {}),
+    });
+    offered.delete(tabId);
+    return { entry: reply.entry, kind: "saved", ok: true };
+  }
+
+  /**
+   * Hold a submitted login, and say whether it is worth asking about.
+   *
+   * Nothing is asked when the store is locked — the answer would be an unlock
+   * prompt over a page that is already navigating away — or when the site
+   * already has an entry under that username, which is the ordinary case of
+   * signing in again.
+   */
+  async function offer(
+    tabId: number,
+    origin: string,
+    login: Captured
+  ): Promise<ExtensionReply> {
+    const host = hostOf(origin);
+    if (!host) {
+      return { kind: "offer", offer: null, ok: true };
+    }
+
+    const state = await refresh();
+    if (state.status !== "unlocked") {
+      return { kind: "offer", offer: null, ok: true };
+    }
+
+    const { matches } = await client.request({ origin, verb: "search" });
+    const known = matches.some(
+      (match) => (match.username ?? "") === (login.username ?? "")
+    );
+    if (known) {
+      return { kind: "offer", offer: null, ok: true };
+    }
+
+    offered.set(tabId, { ...login, origin });
+    const details: SaveOffer = {
+      host,
+      suggestion: suggestedName(host),
+      ...(login.username ? { username: login.username } : {}),
+    };
+    return { kind: "offer", offer: details, ok: true };
+  }
+
   /**
    * Fetch one secret and hand it straight to the page's content script.
    *
@@ -185,6 +315,18 @@ export default defineBackground(() => {
     const command: FillCommand = { kind: "fill", secret: reply.entry };
     await browser.tabs.sendMessage(tabId, command);
     return { kind: "done", ok: true };
+  }
+
+  /** The host of a page origin, or null for anything that is not a web page. */
+  function hostOf(origin: string): string | null {
+    try {
+      const parsed = new URL(origin);
+      return parsed.protocol === "http:" || parsed.protocol === "https:"
+        ? parsed.host
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   /** The toolbar icon is the only always-visible lock indicator. */
