@@ -72,6 +72,11 @@ export function browserBridge(): Bridge {
       window.close();
     },
 
+    async generate(length: number, symbols: boolean): Promise<string> {
+      return (await expect({ kind: "generate", length, symbols }, "password"))
+        .password;
+    },
+
     async list(): Promise<string[]> {
       return (await expect({ kind: "list" }, "entries")).entries;
     },
