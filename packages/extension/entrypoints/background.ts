@@ -6,6 +6,7 @@ import type {
   ExtensionReply,
   ExtensionRequest,
   FillCommand,
+  OfferCommand,
   SaveOffer,
 } from "../lib/messaging";
 import { failure } from "../lib/messaging";
@@ -31,8 +32,15 @@ export default defineBackground(() => {
    * the message that accepts the offer carries a name and nothing else. It is
    * memory only: nothing is written until the user says a name, and closing
    * the tab throws it away (ADR-0007).
+   *
+   * `pushed` records that the offer has been put on the page the tab landed on
+   * after the sign-in, so an offer the user simply ignores is asked once and
+   * not again on every navigation afterwards.
    */
-  const offered = new Map<number, Captured & { origin: string }>();
+  const offered = new Map<
+    number,
+    Captured & { offer: SaveOffer; origin: string; pushed: boolean }
+  >();
 
   const setSession = (next: SessionState) => {
     session = next;
@@ -108,6 +116,23 @@ export default defineBackground(() => {
   // A tab that goes away takes its unanswered offer with it.
   browser.tabs.onRemoved.addListener((tabId) => {
     offered.delete(tabId);
+  });
+
+  /*
+   * A sign-in that posts a form navigates, and the content script that made
+   * the offer dies mid-question. The login is still here, so the offer goes to
+   * whatever page the tab landed on instead.
+   */
+  browser.tabs.onUpdated.addListener((tabId, changes) => {
+    const held = offered.get(tabId);
+    if (changes.status !== "complete" || !held || held.pushed) {
+      return;
+    }
+    held.pushed = true;
+    const command: OfferCommand = { kind: "offerSave", offer: held.offer };
+    // A page with no content script in it — a settings page, a PDF — is not
+    // a fault; there is simply nowhere to ask.
+    void browser.tabs.sendMessage(tabId, command).catch(() => undefined);
   });
 
   async function handle(
@@ -294,12 +319,12 @@ export default defineBackground(() => {
       return { kind: "offer", offer: null, ok: true };
     }
 
-    offered.set(tabId, { ...login, origin });
     const details: SaveOffer = {
       host,
       suggestion: suggestedName(host),
       ...(login.username ? { username: login.username } : {}),
     };
+    offered.set(tabId, { ...login, offer: details, origin, pushed: false });
     return { kind: "offer", offer: details, ok: true };
   }
 
