@@ -33,7 +33,10 @@ describe("renderDropdown", () => {
   it("renders one row per match", () => {
     renderDropdown(root, {
       kind: "matches",
-      matches: [{ name: "web/a.com" }, { name: "web/b.com" }],
+      matches: [
+        { kind: "login", name: "web/a.com" },
+        { kind: "login", name: "web/b.com" },
+      ],
       onPick: () => undefined,
     });
 
@@ -43,7 +46,9 @@ describe("renderDropdown", () => {
   it("leads with the username when there is one", () => {
     renderDropdown(root, {
       kind: "matches",
-      matches: [{ name: "web/a.com", username: "sana@example.com" }],
+      matches: [
+        { kind: "login", name: "web/a.com", username: "sana@example.com" },
+      ],
       onPick: () => undefined,
     });
 
@@ -57,7 +62,7 @@ describe("renderDropdown", () => {
     const onPick = vi.fn();
     renderDropdown(root, {
       kind: "matches",
-      matches: [{ name: "web/a.com" }],
+      matches: [{ kind: "login", name: "web/a.com" }],
       onPick,
     });
 
@@ -72,7 +77,14 @@ describe("renderDropdown", () => {
   it("never puts a secret in the DOM", () => {
     renderDropdown(root, {
       kind: "matches",
-      matches: [{ name: "web/a.com", url: "https://a.com", username: "sana" }],
+      matches: [
+        {
+          kind: "login",
+          name: "web/a.com",
+          url: "https://a.com",
+          username: "sana",
+        },
+      ],
       onPick: () => undefined,
     });
 
@@ -83,7 +95,7 @@ describe("renderDropdown", () => {
     for (const name of ["web/a.com", "web/b.com"]) {
       renderDropdown(root, {
         kind: "matches",
-        matches: [{ name }],
+        matches: [{ kind: "login", name }],
         onPick: () => undefined,
       });
     }
@@ -109,7 +121,7 @@ describe("renderDropdown", () => {
   it("announces itself to assistive technology", () => {
     renderDropdown(root, {
       kind: "matches",
-      matches: [{ name: "web/a.com" }],
+      matches: [{ kind: "login", name: "web/a.com" }],
       onPick: () => undefined,
     });
 
