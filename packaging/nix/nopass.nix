@@ -49,7 +49,7 @@ rustPlatform.buildRustPackage {
     '';
     homepage = "https://github.com/souravsspace/nopass";
     changelog = "https://github.com/souravsspace/nopass/releases";
-    license = lib.licenses.mit;
+    license = lib.licenses.agpl3Only;
     mainProgram = "nopass";
     platforms = lib.platforms.unix;
   };
