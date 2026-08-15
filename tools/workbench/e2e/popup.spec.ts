@@ -7,11 +7,16 @@ const FILL_GITHUB = /fill\(web\/github\.com\)/;
 const FILL_GITHUB_WORK = /fill\(web\/github\.com-work\)/;
 const ANY_REVEAL = /reveal\(/;
 const REVEAL_GITHUB = /reveal\(web\/github\.com\)/;
-const SAVE_EXAMPLE = /save\(web\/example\.com\)/;
+const SAVE_EXAMPLE = /save\(web\/example\.com, login\)/;
 const GENERATE_CALL = /generate\(24, symbols: true\)/;
+const SAVE_CARD = /save\(cards\/amex, card\)/;
+const SAVE_IDENTITY = /save\(me\/work, identity\)/;
+const UPDATE_GITHUB = /update\(web\/github\.com\)/;
+const VIEW_GITHUB = /^View web\/github\.com$/;
+const REPLACES_WHAT_IS_STORED = /This replaces what is stored/;
 const TWENTY_FOUR_CHARACTERS = /^.{24}$/;
 const GITHUB_PASSWORD = "9x!Kd2pQvr4TmZ";
-const LIST_CALL = /list\(\)/;
+const ITEMS_CALL = /items\(all\)/;
 const LOCK_CALL = /lock\(\)/;
 const HOST_INSTALL = /nopass-host install/;
 const TTL_CLOCK = /4:2\d/;
@@ -92,14 +97,16 @@ test.describe("the popup", () => {
 
     await expect(popup(page).getByText("This page")).toBeVisible();
     await expect(popup(page).getByText("All items")).toBeVisible();
-    // `list` is names only, and is the only reason the second section exists.
-    await expect(page.getByText(LIST_CALL)).toBeVisible();
+    // `items` is names, kinds and hints — never a secret — and is the only
+    // reason the second section exists.
+    await expect(page.getByText(ITEMS_CALL)).toBeVisible();
   });
 
   test("narrows the list as you type", async ({ page }) => {
     await scenario(page, "Unlocked");
+    // Four logins, a card and an identity.
     const rows = popup(page).getByRole("listitem");
-    await expect(rows).toHaveCount(4);
+    await expect(rows).toHaveCount(6);
 
     await popup(page).getByPlaceholder("Search your store").fill("work");
     await expect(rows).toHaveCount(1);
@@ -179,7 +186,9 @@ test.describe("the popup", () => {
     await popup(page)
       .getByLabel("Name", { exact: true })
       .fill("web/example.com");
-    await popup(page).getByLabel("Email or username").fill("sana@example.com");
+    await popup(page)
+      .getByLabel("Username", { exact: true })
+      .fill("sana@example.com");
     await popup(page).getByLabel("Password", { exact: true }).fill("hunter2");
     await popup(page).getByRole("button", { name: "Save to store" }).click();
 
@@ -275,5 +284,72 @@ test.describe("the inline dropdown", () => {
 
     const text = await page.getByTestId("dropdown-surface").innerText();
     expect(text).not.toContain("9x!Kd2pQvr4TmZ");
+  });
+});
+
+test.describe("cards and identities", () => {
+  test("saves a card, and never shows its number in the list", async ({
+    page,
+  }) => {
+    await scenario(page, "Unlocked");
+    await popup(page).getByRole("button", { name: "New login" }).click();
+    await popup(page).getByRole("tab", { name: "Card" }).click();
+
+    await popup(page).getByLabel("Name", { exact: true }).fill("cards/amex");
+    await popup(page)
+      .getByLabel("Card number", { exact: true })
+      .fill("378282246310005");
+    await popup(page).getByLabel("Cardholder").fill("Sana Qureshi");
+    await popup(page).getByLabel("Expiry month").fill("04");
+    await popup(page).getByLabel("Expiry year").fill("2029");
+    await popup(page).getByRole("button", { name: "Save to store" }).click();
+
+    await expect(page.getByText(SAVE_CARD)).toBeVisible();
+    await expect(popup(page).getByText("amex added.")).toBeVisible();
+
+    // The row reads as its tail. The number itself is on the entry screen,
+    // behind Show, and nowhere else.
+    await expect(popup(page).getByText("•••• 0005")).toBeVisible();
+    await expect(popup(page).getByText("378282246310005")).toBeHidden();
+  });
+
+  test("saves an identity, which has no secret to type", async ({ page }) => {
+    await scenario(page, "Unlocked");
+    await popup(page).getByRole("button", { name: "New login" }).click();
+    await popup(page).getByRole("tab", { name: "Identity" }).click();
+
+    await expect(
+      popup(page).getByLabel("Card number", { exact: true })
+    ).toBeHidden();
+
+    await popup(page).getByLabel("Name", { exact: true }).fill("me/work");
+    await popup(page).getByLabel("First name").fill("Sana");
+    await popup(page).getByLabel("Last name").fill("Qureshi");
+    await popup(page).getByLabel("Country").fill("Bangladesh");
+    await popup(page).getByRole("button", { name: "Save to store" }).click();
+
+    await expect(page.getByText(SAVE_IDENTITY)).toBeVisible();
+    await expect(popup(page).getByText("work added.")).toBeVisible();
+  });
+
+  test("edits an entry, and asks before replacing it", async ({ page }) => {
+    await scenario(page, "Unlocked");
+    await popup(page)
+      .getByRole("button", { name: VIEW_GITHUB })
+      .click();
+    await popup(page).getByRole("button", { name: "Edit" }).click();
+
+    await popup(page).getByLabel("Username").fill("someone@else");
+    await popup(page).getByRole("button", { name: "Save changes" }).click();
+
+    // The first press asks; nothing has been written yet.
+    await expect(
+      popup(page).getByText(REPLACES_WHAT_IS_STORED)
+    ).toBeVisible();
+    await expect(page.getByText(UPDATE_GITHUB)).toBeHidden();
+
+    await popup(page).getByRole("button", { name: "Replace" }).click();
+    await expect(page.getByText(UPDATE_GITHUB)).toBeVisible();
+    await expect(popup(page).getByText("github.com updated.")).toBeVisible();
   });
 });
