@@ -8,6 +8,8 @@ const FILL_GITHUB_WORK = /fill\(web\/github\.com-work\)/;
 const ANY_REVEAL = /reveal\(/;
 const REVEAL_GITHUB = /reveal\(web\/github\.com\)/;
 const SAVE_EXAMPLE = /save\(web\/example\.com\)/;
+const GENERATE_CALL = /generate\(24, symbols: true\)/;
+const TWENTY_FOUR_CHARACTERS = /^.{24}$/;
 const GITHUB_PASSWORD = "9x!Kd2pQvr4TmZ";
 const LIST_CALL = /list\(\)/;
 const LOCK_CALL = /lock\(\)/;
@@ -183,6 +185,20 @@ test.describe("the popup", () => {
 
     await expect(page.getByText(SAVE_EXAMPLE)).toBeVisible();
     await expect(popup(page).getByText("example.com added.")).toBeVisible();
+  });
+
+  test("generates a password rather than asking for one", async ({ page }) => {
+    await scenario(page, "Unlocked");
+    await popup(page).getByRole("button", { name: "New login" }).click();
+
+    await popup(page).getByLabel("Length").fill("24");
+    await popup(page).getByRole("button", { name: "Generate" }).click();
+
+    await expect(page.getByText(GENERATE_CALL)).toBeVisible();
+    // Shown, not masked: this is the one moment the password is worth reading.
+    const field = popup(page).getByLabel("Password", { exact: true });
+    await expect(field).toHaveAttribute("type", "text");
+    await expect(field).toHaveValue(TWENTY_FOUR_CHARACTERS);
   });
 
   test("refuses to overwrite a name that is already taken", async ({
