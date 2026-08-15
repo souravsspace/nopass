@@ -240,7 +240,6 @@ export default defineBackground(() => {
     }
   }
 
-
   /**
    * The verbs that read or write a record.
    *
