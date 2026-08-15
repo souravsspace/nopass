@@ -2230,3 +2230,254 @@ fn the_short_help_points_at_the_long_one() {
             )),
         );
 }
+
+#[test]
+fn insert_writes_a_card_with_the_fields_it_was_given() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "insert",
+            "-e",
+            "--type",
+            "card",
+            "--field",
+            "cardholder=Sana Qureshi",
+            "--field",
+            "exp=04/2029",
+            "cards/visa",
+        ])
+        .write_stdin("4111111111111111\n")
+        .assert()
+        .success();
+
+    let body = store.show("cards/visa");
+    assert!(body.starts_with("4111111111111111\n"), "{body}");
+    assert!(body.contains("type: card"), "{body}");
+    assert!(body.contains("cardholder: Sana Qureshi"), "{body}");
+    assert!(body.contains("exp: 04/2029"), "{body}");
+}
+
+#[test]
+fn insert_writes_an_identity_that_needs_no_secret() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "insert",
+            "--type",
+            "identity",
+            "--field",
+            "given-name=Sana",
+            "--field",
+            "country=Bangladesh",
+            "me/home",
+        ])
+        .assert()
+        .success();
+
+    let body = store.show("me/home");
+    assert!(body.starts_with("\ntype: identity"), "{body}");
+    assert!(body.contains("given-name: Sana"), "{body}");
+    assert!(body.contains("country: Bangladesh"), "{body}");
+}
+
+#[test]
+fn a_field_carrying_a_line_break_is_refused() {
+    // The same rule the wire keeps: a value free to carry a newline could
+    // forge a `url:` line pointing somewhere the user never typed.
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "insert",
+            "-e",
+            "--field",
+            "url=https://a.b\nusername: someone",
+            "web/example.com",
+        ])
+        .write_stdin("hunter2\n")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn set_changes_one_field_and_leaves_the_rest_alone() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "insert",
+            "-e",
+            "--field",
+            "username=sana",
+            "--field",
+            "url=https://a.b",
+            "web/example.com",
+        ])
+        .write_stdin("hunter2\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["set", "web/example.com", "username=someone@else"])
+        .assert()
+        .success();
+
+    let body = store.show("web/example.com");
+    assert!(body.starts_with("hunter2\n"), "{body}");
+    assert!(body.contains("username: someone@else"), "{body}");
+    assert!(body.contains("url: https://a.b"), "{body}");
+}
+
+#[test]
+fn set_keeps_a_line_it_does_not_understand() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args(["insert", "-m", "notes/thing"])
+        .write_stdin("hunter2\nfavourite-colour: green\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["set", "notes/thing", "username=sana"])
+        .assert()
+        .success();
+
+    assert!(
+        store
+            .show("notes/thing")
+            .contains("favourite-colour: green"),
+        "an unknown line was dropped"
+    );
+}
+
+#[test]
+fn set_writes_a_field_under_the_spelling_the_entry_already_used() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args(["insert", "-m", "web/example.com"])
+        .write_stdin("hunter2\nemail: old@example.com\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["set", "web/example.com", "username=new@example.com"])
+        .assert()
+        .success();
+
+    let body = store.show("web/example.com");
+    assert!(body.contains("email: new@example.com"), "{body}");
+    assert!(
+        !body.contains("username:"),
+        "a second spelling appeared: {body}"
+    );
+}
+
+#[test]
+fn set_can_change_the_secret_itself() {
+    let store = TestStore::new();
+    store.insert("web/example.com", "hunter2");
+
+    store
+        .cmd()
+        .args(["set", "web/example.com", "--secret", "new-password"])
+        .assert()
+        .success();
+
+    assert!(store.show("web/example.com").starts_with("new-password\n"));
+}
+
+#[test]
+fn set_clears_a_field_written_empty() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "insert",
+            "-e",
+            "--field",
+            "username=sana",
+            "web/example.com",
+        ])
+        .write_stdin("hunter2\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["set", "web/example.com", "username="])
+        .assert()
+        .success();
+
+    assert!(!store.show("web/example.com").contains("username"));
+}
+
+#[test]
+fn set_refuses_an_entry_that_is_not_there() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args(["set", "web/nowhere", "username=sana"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn show_can_print_one_field_on_its_own() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "insert",
+            "-e",
+            "--field",
+            "username=sana",
+            "web/example.com",
+        ])
+        .write_stdin("hunter2\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["show", "--field", "username", "web/example.com"])
+        .assert()
+        .success()
+        .stdout("sana\n");
+}
+
+#[test]
+fn show_field_reads_whichever_spelling_the_entry_used() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args(["insert", "-m", "web/example.com"])
+        .write_stdin("hunter2\nemail: sana@example.com\n")
+        .assert()
+        .success();
+
+    store
+        .cmd()
+        .args(["show", "--field", "username", "web/example.com"])
+        .assert()
+        .success()
+        .stdout("sana@example.com\n");
+}
+
+#[test]
+fn show_field_says_so_when_the_entry_has_no_such_field() {
+    let store = TestStore::new();
+    store.insert("web/example.com", "hunter2");
+
+    store
+        .cmd()
+        .args(["show", "--field", "totp", "web/example.com"])
+        .assert()
+        .failure();
+}
