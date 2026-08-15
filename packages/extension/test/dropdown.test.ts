@@ -129,3 +129,51 @@ describe("renderDropdown", () => {
     expect(root.querySelector(".np-row")?.getAttribute("role")).toBe("option");
   });
 });
+
+describe("renderDropdown, on a card field", () => {
+  let root: ShadowRoot;
+
+  beforeEach(() => {
+    root = shadow();
+  });
+
+  it("reads each card as the hint the host built", () => {
+    renderDropdown(root, {
+      items: [
+        { hint: "Visa •••• 4242", kind: "card", name: "cards/visa" },
+        { hint: "Sana Qureshi", kind: "identity", name: "me/home" },
+      ],
+      kind: "wallet",
+      onPick: () => undefined,
+    });
+
+    const names = [...root.querySelectorAll(".np-name")].map(
+      (node) => node.textContent
+    );
+    expect(names).toEqual(["Visa •••• 4242", "Sana Qureshi"]);
+  });
+
+  it("picks the entry, not the hint", () => {
+    const onPick = vi.fn();
+    renderDropdown(root, {
+      items: [{ hint: "Visa •••• 4242", kind: "card", name: "cards/visa" }],
+      kind: "wallet",
+      onPick,
+    });
+
+    const row = root.querySelector(".np-row") as HTMLElement;
+    row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+    expect(onPick).toHaveBeenCalledWith("cards/visa");
+  });
+
+  it("falls back to the entry's own name when there is no hint", () => {
+    renderDropdown(root, {
+      items: [{ kind: "card", name: "cards/spare" }],
+      kind: "wallet",
+      onPick: () => undefined,
+    });
+
+    expect(root.querySelector(".np-name")?.textContent).toBe("spare");
+  });
+});
