@@ -15,6 +15,14 @@ export interface Bridge {
   currentOrigin: () => Promise<string | null>;
   /** Fill the active tab with an entry. */
   fill: (entry: string) => Promise<void>;
+  /**
+   * A fresh random password, made by the host.
+   *
+   * The same generator the CLI uses, drawing on the same OS entropy: the
+   * browser's idea of randomness never comes into it, and a password that is
+   * never typed is one the page cannot have watched being typed.
+   */
+  generate: (length: number, symbols: boolean) => Promise<string>;
   /** Every entry name in the store. Names only — never a secret. */
   list: () => Promise<string[]>;
   lock: () => Promise<SessionState>;
