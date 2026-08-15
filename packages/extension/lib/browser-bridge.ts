@@ -6,7 +6,7 @@
  * keep it alive after the window closed.
  */
 
-import type { Match, Secret } from "@nopass/protocol";
+import type { Item, Kind, Match, Secret } from "@nopass/protocol";
 import { browser } from "#imports";
 import type { Bridge } from "./bridge";
 import { BridgeError } from "./bridge";
@@ -14,6 +14,7 @@ import type {
   Draft,
   ExtensionReply,
   ExtensionSuccess,
+  Patch,
   PopupRequest,
 } from "./messaging";
 import type { SessionState } from "./session";
@@ -77,6 +78,13 @@ export function browserBridge(): Bridge {
         .password;
     },
 
+    async items(kinds?: Kind[]): Promise<Item[]> {
+      const request: PopupRequest = kinds
+        ? { kind: "items", kinds }
+        : { kind: "items" };
+      return (await expect(request, "items")).items;
+    },
+
     async list(): Promise<string[]> {
       return (await expect({ kind: "list" }, "entries")).entries;
     },
@@ -102,6 +110,10 @@ export function browserBridge(): Bridge {
 
     async unlock(passphrase: string): Promise<SessionState> {
       return (await expect({ kind: "unlock", passphrase }, "session")).state;
+    },
+
+    async update(patch: Patch): Promise<string> {
+      return (await expect({ ...patch, kind: "update" }, "saved")).entry;
     },
   };
 }
