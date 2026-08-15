@@ -35,6 +35,10 @@ fn sample() -> (TempDir, Host) {
         ),
         ("web/github.com", "octocat-pw\nusername: sana\n"),
         ("mail/fastmail", "fm-pw\n"),
+        (
+            "work/intranet",
+            "intranet-pw\nusername: sana@work.example\nurl: https://portal.example.org\n",
+        ),
     ]);
     let session = Session::new(dir.path().join("identity.txt"));
     (dir, Host::with_session(store, session))
@@ -125,6 +129,23 @@ fn search_offers_only_entries_for_that_origin() {
         !response.to_string().contains("hunter2"),
         "search leaked a password"
     );
+}
+
+#[test]
+fn search_offers_an_entry_matched_only_by_its_url_line() {
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({ "id": 3, "verb": "search", "origin": "https://portal.example.org" }),
+    );
+
+    let matches = response["matches"].as_array().expect("a list of matches");
+    let names: Vec<&str> = matches
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["work/intranet"]);
+    assert_eq!(matches[0]["url"], json!("https://portal.example.org"));
 }
 
 #[test]
