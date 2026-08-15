@@ -1,13 +1,15 @@
 //! Turning a request into a reply.
 
+use nopass_core::fields;
+use nopass_core::record::Record;
 use nopass_core::{generate, Error as CoreError, Store};
 use serde_json::Value;
 
 use crate::entry;
 use crate::origin::{self, Candidate};
 use crate::proto::{
-    self, ErrorCode, LockState, Match, Request, Secret, StoreState, Success, Yes, KNOWN_VERBS,
-    MUTATING_VERBS, PROTOCOL_VERSION,
+    self, ErrorCode, Field, Item, Kind, LockState, Match, Request, StoreState, Success, Yes,
+    KNOWN_VERBS, MUTATING_VERBS, PROTOCOL_VERSION,
 };
 use crate::session::Session;
 
@@ -109,23 +111,16 @@ impl Host {
 
             Request::Search { origin, .. } => self.search(id, &origin),
 
-            Request::Get { entry: name, .. } => match self.store.show(&name) {
-                Ok(body) => {
-                    let fields = entry::parse(&String::from_utf8_lossy(&body));
-                    proto::success(Success::Get {
-                        id,
-                        ok: Yes,
-                        entry: Secret {
-                            name,
-                            password: fields.password,
-                            username: fields.username,
-                            url: fields.url,
-                            totp: fields.totp,
-                        },
-                    })
-                }
+            Request::Get { entry: name, .. } => match self.read(&name) {
+                Ok(record) => proto::success(Success::Get {
+                    id,
+                    ok: Yes,
+                    entry: entry::to_secret(name, &record),
+                }),
                 Err(error) => proto::failure(id, code_for(&error), error.to_string()),
             },
+
+            Request::Items { kinds, .. } => self.items(id, kinds.as_deref()),
 
             Request::Generate {
                 length, symbols, ..
@@ -140,11 +135,29 @@ impl Host {
 
             Request::Insert {
                 entry,
-                password,
-                username,
-                url,
+                kind,
+                secret,
+                fields,
                 ..
-            } => self.insert(id, entry, &password, username.as_deref(), url.as_deref()),
+            } => self.insert(
+                id,
+                entry,
+                kind.unwrap_or(Kind::Login),
+                secret.as_deref(),
+                fields.as_deref().unwrap_or_default(),
+            ),
+
+            Request::Update {
+                entry,
+                secret,
+                fields,
+                ..
+            } => self.update(
+                id,
+                entry,
+                secret.as_deref(),
+                fields.as_deref().unwrap_or_default(),
+            ),
         }
     }
 
@@ -165,24 +178,12 @@ impl Host {
         &self,
         id: u32,
         name: String,
-        password: &str,
-        username: Option<&str>,
-        url: Option<&str>,
+        kind: Kind,
+        secret: Option<&str>,
+        fields: &[Field],
     ) -> Value {
-        if self.store_state() == StoreState::Missing {
-            return proto::failure(
-                id,
-                ErrorCode::StoreMissing,
-                "there is no store to add an entry to",
-            );
-        }
-
-        if self.session.state().0 == LockState::Locked {
-            return proto::failure(
-                id,
-                ErrorCode::Locked,
-                "the store is locked; unlock before adding an entry",
-            );
+        if let Some(refusal) = self.refuse_a_write(id, "adding an entry") {
+            return refusal;
         }
 
         // Checked before writing rather than relying on the store, which
@@ -195,7 +196,12 @@ impl Host {
             );
         }
 
-        let body = entry::render(password, username, url);
+        let mut record = Record::new(kind.as_record_kind());
+        if let Err(error) = entry::apply(&mut record, secret, fields) {
+            return proto::failure(id, ErrorCode::BadRequest, error.to_string());
+        }
+
+        let body = record.render();
         match self.store.insert(&name, body.as_bytes()) {
             Ok(()) => proto::success(Success::Insert {
                 id,
@@ -204,6 +210,103 @@ impl Host {
             }),
             Err(error) => proto::failure(id, code_for(&error), error.to_string()),
         }
+    }
+
+    /// Rewrite an entry that is already there, field by field.
+    ///
+    /// The bound that makes this safe is not the one on `insert`: this verb
+    /// exists to overwrite. What holds instead is that it cannot create, so a
+    /// name is never claimed by surprise; it cannot remove an entry, only
+    /// fields of one; and it never rewrites a line it was not told about, so
+    /// a field a newer nopass wrote survives an edit made from an older popup
+    /// (ADR-0009). The user confirms the replacement in the UI, which the
+    /// host cannot check and does not pretend to.
+    fn update(&self, id: u32, name: String, secret: Option<&str>, fields: &[Field]) -> Value {
+        if let Some(refusal) = self.refuse_a_write(id, "changing an entry") {
+            return refusal;
+        }
+
+        if !self.store.entry_exists(&name) {
+            return proto::failure(
+                id,
+                ErrorCode::NotFound,
+                format!("{name} is not in the store; `insert` creates one"),
+            );
+        }
+
+        let mut record = match self.read(&name) {
+            Ok(record) => record,
+            Err(error) => return proto::failure(id, code_for(&error), error.to_string()),
+        };
+        if let Err(error) = entry::apply(&mut record, secret, fields) {
+            return proto::failure(id, ErrorCode::BadRequest, error.to_string());
+        }
+
+        match self.store.insert(&name, record.render().as_bytes()) {
+            Ok(()) => proto::success(Success::Update {
+                id,
+                ok: Yes,
+                entry: name,
+            }),
+            Err(error) => proto::failure(id, code_for(&error), error.to_string()),
+        }
+    }
+
+    /// Every entry of the kinds asked for, as a row and never as a secret.
+    ///
+    /// This is how a card reaches a checkout page: cards and identities are
+    /// not offered by origin, because they belong to no site. Each row carries
+    /// what it takes to choose between them — a masked tail, a name — and
+    /// nothing that would matter if it were read.
+    fn items(&self, id: u32, kinds: Option<&[Kind]>) -> Value {
+        let names = match self.store.list("") {
+            Ok(names) => names,
+            Err(error) => return proto::failure(id, code_for(&error), error.to_string()),
+        };
+
+        let items = names
+            .into_iter()
+            .filter_map(|name| {
+                let record = self.read(&name).ok()?;
+                let kind = Kind::from_record_kind(&record.kind());
+                if kinds.is_some_and(|wanted| !wanted.contains(&kind)) {
+                    return None;
+                }
+                Some(Item {
+                    hint: entry::hint(kind, &record),
+                    kind,
+                    name,
+                })
+            })
+            .collect();
+
+        proto::success(Success::Items { id, ok: Yes, items })
+    }
+
+    /// Read and parse one entry.
+    fn read(&self, name: &str) -> nopass_core::Result<Record> {
+        let body = self.store.show(name)?;
+        Ok(Record::parse(&String::from_utf8_lossy(&body)))
+    }
+
+    /// What every write has in common: there has to be a store, and a human
+    /// has to have unlocked it inside the current lease.
+    fn refuse_a_write(&self, id: u32, doing: &str) -> Option<Value> {
+        if self.store_state() == StoreState::Missing {
+            return Some(proto::failure(
+                id,
+                ErrorCode::StoreMissing,
+                "there is no store to write to",
+            ));
+        }
+        if self.session.state().0 == LockState::Locked {
+            return Some(proto::failure(
+                id,
+                ErrorCode::Locked,
+                format!("the store is locked; unlock before {doing}"),
+            ));
+        }
+        None
     }
 
     fn store_state(&self) -> StoreState {
@@ -249,12 +352,20 @@ impl Host {
                     },
                     &page_host,
                 );
-                let fields = self
-                    .store
-                    .show(&name)
-                    .ok()
-                    .map(|body| entry::parse(&String::from_utf8_lossy(&body)));
-                let url = fields.as_ref().and_then(|f| f.url.clone());
+                let record = self.read(&name).ok();
+                let kind = record
+                    .as_ref()
+                    .map_or(Kind::Login, |record| Kind::from_record_kind(&record.kind()));
+
+                // A card and an identity belong to no site, so no origin can
+                // claim them. They are offered through `items`, on a field
+                // that asked for one.
+                if matches!(kind, Kind::Card | Kind::Identity) {
+                    return None;
+                }
+
+                let login = record.as_ref().map(fields::login);
+                let url = login.as_ref().and_then(|login| login.url.clone());
 
                 let by_url = url.is_some()
                     && origin::matches(
@@ -270,7 +381,8 @@ impl Host {
 
                 Some(Match {
                     name,
-                    username: fields.and_then(|f| f.username),
+                    kind,
+                    username: login.and_then(|login| login.username),
                     url,
                 })
             })
