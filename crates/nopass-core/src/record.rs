@@ -136,6 +136,15 @@ impl Record {
         })
     }
 
+    /// The first line that is not a `key: value` pair and begins with
+    /// `prefix` — how a pasted `otpauth://` URI is found.
+    pub fn raw_starting_with(&self, prefix: &str) -> Option<String> {
+        self.lines.iter().find_map(|line| match line {
+            Line::Raw(text) if text.starts_with(prefix) => Some(text.clone()),
+            _ => None,
+        })
+    }
+
     /// Write `key`, replacing the first line that already holds it and leaving
     /// every other line where it is. An empty value removes the field rather
     /// than writing a blank one.
