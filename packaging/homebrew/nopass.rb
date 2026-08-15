@@ -7,7 +7,7 @@ class Nopass < Formula
   homepage "https://github.com/souravsspace/nopass"
   url "https://github.com/souravsspace/nopass/archive/refs/tags/v0.2.1.tar.gz"
   sha256 "35ab5dfc18f22cc255a71b8d0f678d4d3034768df6e0f32ca25c2be63b7dd491"
-  license "MIT"
+  license "AGPL-3.0-only"
 
   depends_on "rust" => :build
 
