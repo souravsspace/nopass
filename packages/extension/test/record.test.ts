@@ -77,7 +77,13 @@ describe("fieldsFor", () => {
   it("covers the parts of an address a checkout asks for", () => {
     const identity = fieldsFor("identity");
 
-    for (const key of ["given-name", "family-name", "street", "city", "country"]) {
+    for (const key of [
+      "given-name",
+      "family-name",
+      "street",
+      "city",
+      "country",
+    ]) {
       expect(identity).toContain(key);
     }
   });
@@ -133,13 +139,20 @@ describe("title", () => {
 
 describe("toFields", () => {
   it("drops the fields nobody filled in", () => {
-    const fields = toFields({ username: "sana", url: "", totp: undefined });
+    const fields = toFields({ totp: undefined, url: "", username: "sana" });
 
     expect(fields).toEqual([{ key: "username", value: "sana" }]);
   });
 
   it("keeps the order the caller listed", () => {
-    const fields = toFields({ "given-name": "Sana", "family-name": "Qureshi" });
+    // Built from pairs rather than a literal: the screen hands these over in
+    // the order it renders them, which is the order they should be written.
+    const fields = toFields(
+      Object.fromEntries([
+        ["given-name", "Sana"],
+        ["family-name", "Qureshi"],
+      ])
+    );
 
     expect(fields.map((field) => field.key)).toEqual([
       "given-name",
