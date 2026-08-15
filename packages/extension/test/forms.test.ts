@@ -11,6 +11,14 @@ function first(forms: LoginForm[]): LoginForm {
   return form;
 }
 
+/** The password field, or a failure that says so rather than a type error. */
+function passwordOf(form: LoginForm): HTMLInputElement {
+  if (!form.password) {
+    throw new Error("expected a password field");
+  }
+  return form.password;
+}
+
 function render(html: string): Document {
   document.body.innerHTML = html;
   return document;
@@ -33,7 +41,7 @@ describe("findLoginForms", () => {
     const form = first(forms);
     const rest = forms.slice(1);
     expect(rest).toHaveLength(0);
-    expect(form.password.getAttribute("name")).toBe("pass");
+    expect(passwordOf(form).getAttribute("name")).toBe("pass");
     expect(form.username?.getAttribute("name")).toBe("user");
   });
 
@@ -127,6 +135,44 @@ describe("findLoginForms", () => {
 
     expect(first(findLoginForms(document)).username).toBeNull();
   });
+
+  it("finds the account field of a sign-in that asks for it first", () => {
+    render(`<form><input type="email" name="identifier" /></form>`);
+
+    const form = first(findLoginForms(document));
+    expect(form.username?.getAttribute("name")).toBe("identifier");
+    expect(form.password).toBeNull();
+  });
+
+  it("takes a text field that says it holds a username", () => {
+    render(
+      `<form><input autocomplete="username" name="whatever" /></form>`
+    );
+
+    expect(first(findLoginForms(document)).username?.getAttribute("name")).toBe(
+      "whatever"
+    );
+  });
+
+  it("leaves a text field that claims nothing alone", () => {
+    render(`<form><input type="text" name="postcode" /></form>`);
+
+    expect(findLoginForms(document)).toHaveLength(0);
+  });
+
+  it("does not reopen a sign-up form through its email field", () => {
+    // The two password boxes ruled this form out; the address above them is
+    // not a second chance to fill it.
+    render(`
+      <form>
+        <input type="email" name="email" />
+        <input type="password" name="new" />
+        <input type="password" name="confirm" />
+      </form>
+    `);
+
+    expect(findLoginForms(document)).toHaveLength(0);
+  });
 });
 
 describe("fillLogin", () => {
@@ -141,7 +187,7 @@ describe("fillLogin", () => {
     fillLogin(form, { password: "hunter2", username: "sana" });
 
     expect(form.username?.value).toBe("sana");
-    expect(form.password.value).toBe("hunter2");
+    expect(passwordOf(form).value).toBe("hunter2");
   });
 
   it("announces the change so a framework notices it", () => {
@@ -152,7 +198,7 @@ describe("fillLogin", () => {
     const form = first(findLoginForms(document));
     const seen: string[] = [];
     for (const type of ["input", "change"]) {
-      form.password.addEventListener(type, (event) => {
+      passwordOf(form).addEventListener(type, (event) => {
         seen.push(event.type);
         expect(event.bubbles).toBe(true);
       });
@@ -174,10 +220,19 @@ describe("fillLogin", () => {
     expect(form.username?.value).toBe("typed");
   });
 
+  it("fills the account name alone on a first step that has no password", () => {
+    render(`<form><input type="email" name="identifier" /></form>`);
+    const form = first(findLoginForms(document));
+
+    fillLogin(form, { password: "hunter2", username: "sana@example.com" });
+
+    expect(form.username?.value).toBe("sana@example.com");
+  });
+
   it("focuses the password so the user can see it landed", () => {
     render(`<form><input type="text" /><input type="password" /></form>`);
     const form = first(findLoginForms(document));
-    const focus = vi.spyOn(form.password, "focus");
+    const focus = vi.spyOn(passwordOf(form), "focus");
 
     fillLogin(form, { password: "hunter2" });
 
