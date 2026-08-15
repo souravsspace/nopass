@@ -145,9 +145,7 @@ describe("findLoginForms", () => {
   });
 
   it("takes a text field that says it holds a username", () => {
-    render(
-      `<form><input autocomplete="username" name="whatever" /></form>`
-    );
+    render(`<form><input autocomplete="username" name="whatever" /></form>`);
 
     expect(first(findLoginForms(document)).username?.getAttribute("name")).toBe(
       "whatever"
