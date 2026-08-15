@@ -9,11 +9,17 @@
  * it. That also means no Tailwind, hence the stylesheet below.
  */
 
-import type { Match } from "@nopass/protocol";
+import type { Item, Match } from "@nopass/protocol";
 import type { SessionState } from "./session";
 
 export type DropdownView =
   | { kind: "matches"; matches: Match[]; onPick: (entry: string) => void }
+  /**
+   * Cards and identities, on a field that asked for one. A row reads as the
+   * hint the host built — `Visa •••• 4242` — because that is everything a
+   * choice needs and nothing that would matter if the page could read it.
+   */
+  | { kind: "wallet"; items: Item[]; onPick: (entry: string) => void }
   | { kind: "locked"; state: SessionState };
 
 /** The last path segment is the part worth reading; the rest is filing. */
@@ -56,28 +62,41 @@ export function renderDropdown(root: ShadowRoot, view: DropdownView): void {
     return;
   }
 
-  for (const match of view.matches) {
+  const rows =
+    view.kind === "wallet"
+      ? view.items.map((item) => ({
+          meta: displayName(item.name),
+          name: item.hint || displayName(item.name),
+          picks: item.name,
+        }))
+      : view.matches.map((match) => ({
+          meta: match.username
+            ? displayName(match.name)
+            : (folderOf(match.name) ?? ""),
+          name: match.username ?? displayName(match.name),
+          picks: match.name,
+        }));
+
+  for (const match of rows) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "np-row";
     row.setAttribute("role", "option");
-    row.dataset.entry = match.name;
+    row.dataset.entry = match.picks;
 
     const name = document.createElement("span");
     name.className = "np-name";
-    name.textContent = match.username ?? displayName(match.name);
+    name.textContent = match.name;
 
     const meta = document.createElement("span");
     meta.className = "np-meta";
-    meta.textContent = match.username
-      ? displayName(match.name)
-      : (folderOf(match.name) ?? "");
+    meta.textContent = match.meta;
 
     row.append(name, meta);
     row.addEventListener("mousedown", (event) => {
       // mousedown, not click: focusout would tear the panel down first.
       event.preventDefault();
-      view.onPick(match.name);
+      view.onPick(match.picks);
     });
     panel.append(row);
   }
