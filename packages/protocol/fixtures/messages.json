@@ -386,10 +386,7 @@
       "json": {
         "id": 20,
         "verb": "items",
-        "kinds": [
-          "card",
-          "identity"
-        ]
+        "kinds": ["card", "identity"]
       }
     },
     {
@@ -406,9 +403,7 @@
       "json": {
         "id": 22,
         "verb": "items",
-        "kinds": [
-          "ssh-key"
-        ]
+        "kinds": ["ssh-key"]
       }
     }
   ],
@@ -485,11 +480,7 @@
         "id": 5,
         "ok": true,
         "verb": "list",
-        "entries": [
-          "web/github.com",
-          "web/google.com",
-          "mail/fastmail"
-        ]
+        "entries": ["web/github.com", "web/google.com", "mail/fastmail"]
       }
     },
     {
@@ -652,10 +643,7 @@
         "id": 5,
         "ok": true,
         "verb": "list",
-        "entries": [
-          "web/ok",
-          7
-        ]
+        "entries": ["web/ok", 7]
       }
     },
     {
