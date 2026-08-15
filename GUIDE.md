@@ -3,12 +3,13 @@
 The nopass browser extension fills logins from the store already on your disk,
 and saves new ones into it. It talks to `nopass-host` over native messaging.
 
-**It can create an entry and nothing more.** There is no schema for `edit`,
-`rm`, `mv` or `cp`, so nothing already in the store can be rewritten, moved or
-destroyed over this wire, and a name that is already taken is refused rather
-than overwritten ([ADR-0006](docs/adr/0006-create-only-writes-from-the-extension.md)).
-Creating needs only your store's public key, so your passphrase never enters
-the browser.
+**It can create an entry, and change the fields of one it can already read.**
+There is no schema for `rm`, `mv` or `cp`, so nothing on this wire can move or
+destroy what is in your store, and a name that is already taken is refused
+rather than claimed ([ADR-0006](docs/adr/0006-create-only-writes-from-the-extension.md),
+[ADR-0009](docs/adr/0009-updating-an-entry-from-the-extension.md)). Creating
+needs only your store's public key, so your passphrase never enters the
+browser.
 
 - [Install it](#install-it)
 - [Using the popup](#using-the-popup)
@@ -94,7 +95,7 @@ screenshot.
 | Section | Verb | What it is |
 | --- | --- | --- |
 | **This page** | `search` | Entries matching on their `url:` line, or on a name that ends in the host. |
-| **All items** | `list` | Every name in your store. Names only — `list` cannot return a secret. |
+| **All items** | `items` | Every entry in your store, as a name, a kind and a hint — a username, `Visa •••• 4242`, a person's name. Never a secret. |
 
 Typing in the search box filters both. The search runs over names, before
 anything is decrypted.
@@ -219,10 +220,12 @@ reached.
 | `hello` / `status` | Whether the store exists, and the lock state with its TTL | Every popup open |
 | `unlock` / `lock` | The new lock state | The passphrase form, the pill |
 | `search` | Matches for an origin — **no secret** | "This page" |
-| `list` | Every entry name — **no secret** | "All items" |
+| `list` | Every entry name — **no secret** | scripts and tests |
+| `items` | Names, kinds and hints — **no secret** | "All items", and the card rows on a checkout |
 | `get` | One entry's secret | Fill, copy, the entry screen |
 | `generate` | A fresh random password | **Generate** on "New login" |
-| `insert` | The name it created — **create only** | "New login", the save prompt |
+| `insert` | The name it created — **create only** | "New item", the save prompt |
+| `update` | The name it rewrote — **named fields only** | **Edit**, behind its confirmation |
 
 The content script's vocabulary is narrower than the popup's on purpose: it may
 cause a fill, look up matches, and offer a login that was just submitted, but it
