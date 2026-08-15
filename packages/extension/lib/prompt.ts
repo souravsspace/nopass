@@ -10,11 +10,11 @@
 export interface SavePromptView {
   /** The site the login was typed into, shown so the offer is attributable. */
   host: string;
+  onDismiss: () => void;
+  onSave: (entry: string) => void;
   /** The name the entry would take, which the user may rewrite. */
   suggestion: string;
   username?: string | undefined;
-  onSave: (entry: string) => void;
-  onDismiss: () => void;
 }
 
 /** Render the prompt. Replaces whatever was there, so it can be re-rendered. */
