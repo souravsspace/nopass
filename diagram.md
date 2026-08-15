@@ -116,7 +116,7 @@ flowchart TB
 
 | Path | What lives there |
 |---|---|
-| `crates/nopass-core` | The engine. Store tree, age crypto, identity slots, the agent, git, generation. No I/O with a user. |
+| `crates/nopass-core` | The engine. Store tree, age crypto, identity slots, the agent, git, generation, and the record format every front end reads. No I/O with a user. |
 | `crates/nopass-cli` | The `nopass` binary: commands, prompts, FIDO2, first-run setup. |
 | `crates/nopass-host` | The native messaging host: framing, protocol, dispatch, origin matching, browser manifest install. |
 | `packages/protocol` | The wire contract as Zod schemas, plus the JSON fixtures both languages test against. |
@@ -165,8 +165,21 @@ flowchart TB
     I -->|no| K["done"]
 ```
 
-An entry body is one line of password followed by free-form `key: value` lines.
-The conventional keys are what the browser side reads:
+An entry body is one line of secret followed by free-form `key: value` lines.
+A `type:` line names what the entry holds; an entry without one is a login,
+which is what every entry written before ADR-0008 is.
+
+| Kind | The first line | Keys it claims |
+|---|---|---|
+| `login` | the password | `username` · `url` · `totp` |
+| `card` | the card number | `cardholder` · `exp-month` · `exp-year` · `cvv` · `brand` · `zip` |
+| `identity` | *empty* | `given-name` · `family-name` · `email` · `phone` · `birthday` · `age` · `street` · `street2` · `city` · `region` · `postcode` · `country` · `organization` |
+| `passkey` | the private key | `rp` · `user` · `user-handle` · `credential-id` · `alg` · `counter` |
+
+Every key names the spellings it is recognised by — `email:` and `user:` both
+read as `username` — and **a line no build understands is carried through a
+parse and a render untouched**, which is what makes an edit from an older
+client safe. The conventional login keys:
 
 ```
 9x!Kd2pQvr4TmZ
@@ -337,17 +350,25 @@ sequenceDiagram
 | `search` | origin | matching names + username + url, **no secret** | popup, content |
 | `get` | entry name | one secret, for one fill | popup; content only via a fill it cannot read |
 | `generate` | length, symbols | a fresh password, **not stored** | popup only |
-| `insert` | name, password, username?, url? | the name created | popup, and the save prompt (ADR-0007) |
+| `items` | kinds? | every entry of those kinds as a name, a kind and a **hint** — a masked card tail, a person's name — never a secret | popup; a content script may ask only for `card` and `identity` |
+| `insert` | name, kind?, secret?, fields? | the name created | popup, and the save prompt (ADR-0007) |
+| `update` | name, secret?, fields? | the name rewritten | popup only, behind a confirmation (ADR-0009) |
 
 Refused at the protocol layer, with a typed `read_only` error and a test that
 says so: `edit`, `rm`, `remove`, `delete`, `mv`, `rename`, `cp`, `copy`, `init`,
-`generate_into`. There is no shape of request this host accepts that reaches an
-entry already in the store (ADR-0002, ADR-0006).
+`generate_into`. No shape of request this host accepts can move an entry,
+destroy one, or claim a name that is taken (ADR-0002, ADR-0006, ADR-0009).
+
+`get` and `search` speak **canonical keys**: the host resolves whichever
+spelling the entry uses into one name per field, so the extension needs no
+alias table, and `update` writes back under the spelling already there.
 
 `insert` is allowed only when the store is **unlocked** and the name is
-**free**. An overwrite is the reason a write path would be worth attacking —
-replacing `web/bank.example` with a password the attacker knows turns a
-disclosure bug into an account takeover — so it is refused with `exists`.
+**free**; a name already taken is refused with `exists`, because replacing
+`web/bank.example` with a password the attacker knows turns a disclosure bug
+into an account takeover. `update` is the other side of that line: it may
+rewrite an entry that exists, one named field at a time, and it can neither
+create nor delete (ADR-0009).
 
 ---
 
@@ -360,7 +381,8 @@ flowchart TB
     end
 
     subgraph content ["Content script — isolated world"]
-        forms["lib/forms<br/><i>find and fill</i>"]
+        forms["lib/forms<br/><i>find and fill a login</i>"]
+        autofill["lib/autofill<br/><i>card and address fields</i>"]
         capture["lib/capture<br/><i>read a submitted login</i>"]
         dd["lib/dropdown<br/><i>closed shadow root</i>"]
         prompt["lib/prompt<br/><i>closed shadow root</i>"]
@@ -379,6 +401,7 @@ flowchart TB
     end
 
     form --> forms
+    form --> autofill
     form --> capture
     forms --> dd
     capture --> prompt
@@ -400,15 +423,18 @@ flowchart LR
         p6[reveal] --- p7[generate] --- p8[save] --- p9[fill]
     end
     subgraph C ["ContentRequest"]
-        c1[session] --- c2[matches] --- c3[fillHere]
+        c1[session] --- c2[matches] --- c3[fillHere] --- c7[wallet]
         c4[captured] --- c5[saveCaptured] --- c6[dismissCaptured]
     end
 ```
 
 A content script can cause a fill but is never handed a secret to read; it
-cannot enumerate the store; and it has no `save` — what it can do is *offer* a
-login the user just submitted, and then *name* one the background is already
-holding for its own tab (ADR-0007). Every tab-scoped request takes its tab id
+cannot enumerate the store; and it has no `save` or `update` — what it can do
+is *offer* a login the user just submitted, and then *name* one the background
+is already holding for its own tab (ADR-0007). `wallet` is the one enumerating
+word it has, and the background narrows it to `items` for **cards and
+identities only**: those belong to no site, so `search` cannot reach them, and
+a row carries a masked tail rather than a number. Every tab-scoped request takes its tab id
 from `sender`, never from the message, so a tab can only ever act on itself.
 
 Replies go back through `sendResponse` with the listener returning `true`.
@@ -438,6 +464,36 @@ than a redundant unlock prompt.
 ---
 
 ## 9. The three flows that matter
+
+### Fill a card into a checkout
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant P as Checkout page
+    participant C as Content script
+    participant B as Background
+    participant H as Host
+
+    U->>P: focus a field
+    P->>C: focusin (trusted)
+    C->>C: lib/autofill reads its autocomplete token
+    Note over C: `cc-number` → a card field.<br/>No token, no narrow name match → nothing happens
+    C->>B: {kind:"wallet"}
+    B->>H: items(kinds: card, identity)
+    H-->>B: rows with masked hints
+    B-->>C: rows for this field's kind
+    C->>U: `Visa •••• 4242`, in a closed shadow root
+    U->>C: pick a row
+    C->>B: {kind:"fillHere", entry}
+    B->>H: get(entry)
+    H-->>B: the card and its fields
+    B->>C: {kind:"fill", secret}
+    C->>P: number, name, expiry, security code into the fields that asked
+```
+
+A card is never filled without that pick. There is no origin rule to lean on —
+a card belongs to no site — so the user choosing it is the whole gate.
 
 ### Fill from the inline dropdown
 
@@ -617,6 +673,8 @@ timeline
                : ADR-0005 unlock through the existing nopass agent
     2026-08-09 : ADR-0006 create-only writes, superseding 0002 in one respect
     2026-08-15 : ADR-0007 a page may offer a login; only the user may name one
+               : ADR-0008 an entry says what it is, on a type line
+               : ADR-0009 the extension may rewrite an entry, field by field
 ```
 
 | ADR | Decision | What it bought | What it cost |
@@ -628,6 +686,8 @@ timeline
 | [0005](docs/adr/0005-unlock-via-nopass-agent.md) | The host reads and writes the same agent the CLI uses | One unlock state and one place to audit; `nopass lock` locks the browser too | `agent.rs` had to move from the CLI into core |
 | [0006](docs/adr/0006-create-only-writes-from-the-extension.md) | One mutating verb, `insert`, gated on unlocked + name free | "Save this login" became possible without the passphrase entering the browser | A compromised extension can add junk entries |
 | [0007](docs/adr/0007-saving-a-login-from-the-page.md) | A content script may offer a captured login and name one; it may not compose a save | The prompt appears at the moment the login is typed, where it belongs | Three more words in the content script's vocabulary |
+| [0008](docs/adr/0008-typed-records-in-the-entry-body.md) | A `type:` line names what an entry holds; each kind claims its own keys | Cards and identities are ordinary entries — same crypto, same sync, still hand-editable | Two vocabularies to keep in step: aliases on disk, canonical keys on the wire |
+| [0009](docs/adr/0009-updating-an-entry-from-the-extension.md) | `update` rewrites named fields of an entry that exists, behind a confirmation | An expiry, an address, a username can be fixed where they are noticed | A compromised extension can rewrite what it can already read |
 
 Two decisions were made the same way and are worth reading as a pair: ADR-0002
 rejected writing because nopass authenticates every mutation and a native host
@@ -686,7 +746,9 @@ patch.
 3. **A page script can never cause a fill, a read, or a write.** Only a trusted
    user gesture in the extension's own UI can.
 4. **A content script is never handed a secret it can read**, and never learns
-   what is in the store beyond its own origin's matches.
+   what is in the store beyond its own origin's matches and the masked rows of
+   the wallet kinds.
+   
 5. **Tab-scoped requests take their tab id from `sender`.**
 6. **Origin matching happens in the host.**
 7. **The agent holds secrets in memory only**, expiring against the wall clock,
