@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use nopass_core::lock::{
     encrypt_slot, encrypt_slot_with_key, is_valid_label, Fido2Slot, LockedIdentity, SecretString,
 };
+use nopass_core::record::{Kind, Record};
 use nopass_core::{crypto, default_store_dir, git, Crypto, NativeCrypto, Store, Unlocker};
 use zeroize::Zeroize;
 
@@ -107,6 +108,9 @@ enum Cmd {
         /// Copy line N of the entry to the clipboard instead of printing
         #[arg(short, long, value_name = "line", num_args = 0..=1, default_missing_value = "1")]
         clip: Option<usize>,
+        /// Print one field on its own — `username`, `url`, `exp-month`, …
+        #[arg(long, value_name = "key", conflicts_with = "clip")]
+        field: Option<String>,
         name: Option<String>,
     },
     /// List entries matching the given terms
@@ -124,7 +128,23 @@ enum Cmd {
         /// Overwrite without prompting
         #[arg(short, long)]
         force: bool,
+        /// What the entry holds: login (default), card, identity or passkey
+        #[arg(long, value_name = "kind", conflicts_with = "multiline")]
+        r#type: Option<String>,
+        /// A `key=value` line to write with it; repeatable
+        #[arg(long = "field", value_name = "key=value", conflicts_with = "multiline")]
+        fields: Vec<String>,
         name: String,
+    },
+    /// Change fields of an entry that is already in the store
+    Set {
+        /// Replace the first line — the password, or a card's number
+        #[arg(long, value_name = "value")]
+        secret: Option<String>,
+        name: String,
+        /// `key=value` to write, or `key=` to clear it
+        #[arg(value_name = "key=value")]
+        fields: Vec<String>,
     },
     /// Edit an entry with $EDITOR
     Edit { name: String },
@@ -264,7 +284,10 @@ fn run() -> Result<()> {
         Some(Cmd::Ls { subfolder }) => {
             show_or_list(&store, subfolder.as_deref().unwrap_or(""), None)
         }
-        Some(Cmd::Show { clip, name }) => show_or_list(&store, name.as_deref().unwrap_or(""), clip),
+        Some(Cmd::Show { clip, field, name }) => match field {
+            Some(key) => cmd_show_field(&store, name.as_deref().unwrap_or(""), &key),
+            None => show_or_list(&store, name.as_deref().unwrap_or(""), clip),
+        },
         Some(Cmd::Init {
             path,
             identity,
@@ -283,8 +306,23 @@ fn run() -> Result<()> {
             echo,
             multiline,
             force,
+            r#type,
+            fields,
             name,
-        }) => cmd_insert(&store, &name, echo, multiline, force),
+        }) => cmd_insert(
+            &store,
+            &name,
+            echo,
+            multiline,
+            force,
+            r#type.as_deref(),
+            &fields,
+        ),
+        Some(Cmd::Set {
+            secret,
+            name,
+            fields,
+        }) => cmd_set(&store, &name, secret.as_deref(), &fields),
         Some(Cmd::Edit { name }) => cmd_edit(&store, &name),
         Some(Cmd::Generate {
             no_symbols,
@@ -946,34 +984,140 @@ fn confirm_overwrite(store: &Store, name: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_insert(store: &Store, name: &str, echo: bool, multiline: bool, force: bool) -> Result<()> {
+#[allow(clippy::fn_params_excessive_bools)]
+fn cmd_insert(
+    store: &Store,
+    name: &str,
+    echo: bool,
+    multiline: bool,
+    force: bool,
+    kind: Option<&str>,
+    fields: &[String],
+) -> Result<()> {
     // Adding to the store is a change to it, so prove the store is yours
     // before anything is typed into it.
     store.authenticate()?;
     confirm_overwrite(store, name, force)?;
+
+    // A typed entry is composed rather than typed straight in: the kind names
+    // a `type:` line, and each `--field` is one `key: value` beneath it.
+    if kind.is_some() || !fields.is_empty() {
+        let kind = kind.map_or(Kind::Login, parse_kind);
+        let mut record = Record::new(kind.clone());
+        let secret = if kind == Kind::Identity {
+            // Nothing to hide, and nothing to ask for: an identity's first
+            // line is empty.
+            String::new()
+        } else {
+            read_secret(name, echo)?
+        };
+        record.set_primary(&secret)?;
+        apply_fields(&mut record, fields)?;
+        store.insert(name, record.render().as_bytes())?;
+        return Ok(());
+    }
 
     let contents = if multiline {
         println!("Enter contents of {name} and press Ctrl+D when finished:\n");
         let mut buf = Vec::new();
         std::io::stdin().read_to_end(&mut buf)?;
         buf
-    } else if echo || !std::io::stdin().is_terminal() {
+    } else {
+        format!("{}\n", read_secret(name, echo)?).into_bytes()
+    };
+    store.insert(name, &contents)?;
+    Ok(())
+}
+
+/// The first line of an entry, read the way the user asked for it to be read.
+fn read_secret(name: &str, echo: bool) -> Result<String> {
+    if echo || !std::io::stdin().is_terminal() {
         let mut line = String::new();
         if std::io::stdin().is_terminal() {
             eprint!("Enter password for {name}: ");
         }
         std::io::stdin().read_line(&mut line)?;
-        format!("{}\n", line.trim_end_matches('\n')).into_bytes()
-    } else {
-        let pw = prompt_hidden(&format!("Enter password for {name}: "))?;
-        let again = prompt_hidden(&format!("Retype password for {name}: "))?;
-        if pw != again {
-            bail!("Error: the entered passwords do not match.");
+        return Ok(line.trim_end_matches('\n').to_string());
+    }
+
+    let pw = prompt_hidden(&format!("Enter password for {name}: "))?;
+    let again = prompt_hidden(&format!("Retype password for {name}: "))?;
+    if pw != again {
+        bail!("Error: the entered passwords do not match.");
+    }
+    Ok(pw)
+}
+
+fn parse_kind(name: &str) -> Kind {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "card" => Kind::Card,
+        "identity" => Kind::Identity,
+        "passkey" => Kind::Passkey,
+        "login" | "password" => Kind::Login,
+        other => Kind::Other(other.to_string()),
+    }
+}
+
+/// Apply `key=value` arguments to a record.
+///
+/// A field goes in under the spelling the entry already uses, so `set` on an
+/// entry that says `email:` keeps saying `email:`. An empty value clears the
+/// field rather than writing a blank line.
+fn apply_fields(record: &mut Record, fields: &[String]) -> Result<()> {
+    for pair in fields {
+        let (key, value) = pair
+            .split_once('=')
+            .with_context(|| format!("`{pair}` is not key=value"))?;
+        let key = key.trim().to_ascii_lowercase();
+        match nopass_core::fields::aliases_for(&key) {
+            Some(aliases) => record.set_alias(&key, aliases, value)?,
+            None => record.set(&key, value)?,
         }
-        format!("{pw}\n").into_bytes()
-    };
-    store.insert(name, &contents)?;
+    }
     Ok(())
+}
+
+/// Change fields of an entry that is already there.
+///
+/// Reading it means decrypting it, and rewriting it means the same
+/// authentication `insert` and `edit` ask for. What it will not do is create:
+/// a name that is not in the store is a typo, not an invitation.
+fn cmd_set(store: &Store, name: &str, secret: Option<&str>, fields: &[String]) -> Result<()> {
+    store.authenticate()?;
+    if !store.entry_exists(name) {
+        bail!("Error: {name} is not in the store. Use `nopass insert` to create it.");
+    }
+    if secret.is_none() && fields.is_empty() {
+        bail!("Error: nothing to change. Pass key=value, or --secret.");
+    }
+
+    let body = store.show(name)?;
+    let mut record = Record::parse(&String::from_utf8_lossy(&body));
+    if let Some(secret) = secret {
+        record.set_primary(secret)?;
+    }
+    apply_fields(&mut record, fields)?;
+    store.insert(name, record.render().as_bytes())?;
+    Ok(())
+}
+
+/// One field of an entry, for a script that wants exactly that.
+fn cmd_show_field(store: &Store, name: &str, key: &str) -> Result<()> {
+    let body = store.show(name)?;
+    let record = Record::parse(&String::from_utf8_lossy(&body));
+    let key = key.trim().to_ascii_lowercase();
+
+    let value = match nopass_core::fields::aliases_for(&key) {
+        Some(aliases) => record.get(aliases),
+        None => record.get(&[key.as_str()]),
+    };
+    match value {
+        Some(value) => {
+            println!("{value}");
+            Ok(())
+        }
+        None => bail!("Error: {name} has no {key}."),
+    }
 }
 
 fn cmd_edit(store: &Store, name: &str) -> Result<()> {
