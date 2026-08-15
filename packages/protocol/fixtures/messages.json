@@ -1,16 +1,23 @@
 {
   "comment": "The source of truth for the native messaging contract. Both packages/protocol (Zod) and crates/nopass-host (serde) are tested against this file, so neither can drift. Valid cases must round-trip: parse then re-serialise must deep-equal the original.",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requests": [
     {
       "name": "hello announces the extension's protocol version",
       "valid": true,
-      "json": { "id": 1, "verb": "hello", "version": 1 }
+      "json": {
+        "id": 1,
+        "verb": "hello",
+        "version": 2
+      }
     },
     {
       "name": "status asks whether the store is unlocked",
       "valid": true,
-      "json": { "id": 2, "verb": "status" }
+      "json": {
+        "id": 2,
+        "verb": "status"
+      }
     },
     {
       "name": "unlock carries the passphrase",
@@ -24,129 +31,385 @@
     {
       "name": "lock drops the cached identity",
       "valid": true,
-      "json": { "id": 4, "verb": "lock" }
+      "json": {
+        "id": 4,
+        "verb": "lock"
+      }
     },
     {
       "name": "list asks for entry names",
       "valid": true,
-      "json": { "id": 5, "verb": "list" }
+      "json": {
+        "id": 5,
+        "verb": "list"
+      }
     },
     {
       "name": "search matches entries against a page origin",
       "valid": true,
-      "json": { "id": 6, "verb": "search", "origin": "https://mail.google.com" }
+      "json": {
+        "id": 6,
+        "verb": "search",
+        "origin": "https://mail.google.com"
+      }
     },
     {
       "name": "get asks for one entry's secret",
       "valid": true,
-      "json": { "id": 7, "verb": "get", "entry": "web/google.com" }
+      "json": {
+        "id": 7,
+        "verb": "get",
+        "entry": "web/google.com"
+      }
     },
     {
       "name": "generate asks for a password it will not store",
       "valid": true,
-      "json": { "id": 8, "verb": "generate", "length": 24, "symbols": true }
+      "json": {
+        "id": 8,
+        "verb": "generate",
+        "length": 24,
+        "symbols": true
+      }
     },
     {
       "name": "an unknown verb is rejected",
       "valid": false,
-      "json": { "id": 9, "verb": "telepathy" }
+      "json": {
+        "id": 9,
+        "verb": "telepathy"
+      }
     },
     {
-      "name": "insert creates one entry (ADR-0006)",
+      "name": "insert creates a login: a secret and its canonical fields",
       "valid": true,
       "json": {
         "id": 10,
         "verb": "insert",
         "entry": "web/example.com",
-        "password": "hunter2",
-        "username": "sana@example.com",
-        "url": "https://example.com/login"
+        "kind": "login",
+        "secret": "hunter2",
+        "fields": [
+          {
+            "key": "username",
+            "value": "sana@example.com"
+          },
+          {
+            "key": "url",
+            "value": "https://example.com/login"
+          }
+        ]
       }
     },
     {
-      "name": "insert may carry nothing but a password",
+      "name": "insert may carry nothing but a secret, and no kind means login",
       "valid": true,
       "json": {
         "id": 10,
         "verb": "insert",
         "entry": "web/example.com",
-        "password": "hunter2"
+        "secret": "hunter2"
       }
     },
     {
-      "name": "insert with an empty password is rejected",
+      "name": "insert with an empty secret is rejected for a kind that has one",
       "valid": false,
       "json": {
         "id": 10,
         "verb": "insert",
         "entry": "web/example.com",
-        "password": ""
+        "secret": ""
       }
     },
     {
-      "name": "a newline in an insert field is rejected: it would forge a second field",
+      "name": "a newline in a field value is rejected: it would forge a second field",
       "valid": false,
       "json": {
         "id": 10,
         "verb": "insert",
         "entry": "web/example.com",
-        "password": "hunter2\nurl: https://phish.example"
+        "secret": "hunter2",
+        "fields": [
+          {
+            "key": "url",
+            "value": "https://a.b\nurl: https://phish.example"
+          }
+        ]
       }
     },
     {
       "name": "edit is rejected: the host may create but never rewrite (ADR-0006)",
       "valid": false,
-      "json": { "id": 11, "verb": "edit", "entry": "web/example.com" }
+      "json": {
+        "id": 11,
+        "verb": "edit",
+        "entry": "web/example.com"
+      }
     },
     {
       "name": "rm is rejected: the host may create but never destroy (ADR-0006)",
       "valid": false,
-      "json": { "id": 12, "verb": "rm", "entry": "web/example.com" }
+      "json": {
+        "id": 12,
+        "verb": "rm",
+        "entry": "web/example.com"
+      }
     },
     {
       "name": "mv is rejected: the host may create but never move (ADR-0006)",
       "valid": false,
-      "json": { "id": 13, "verb": "mv", "from": "a", "to": "b" }
+      "json": {
+        "id": 13,
+        "verb": "mv",
+        "from": "a",
+        "to": "b"
+      }
     },
     {
       "name": "cp is rejected: the host may create but never copy (ADR-0006)",
       "valid": false,
-      "json": { "id": 14, "verb": "cp", "from": "a", "to": "b" }
+      "json": {
+        "id": 14,
+        "verb": "cp",
+        "from": "a",
+        "to": "b"
+      }
     },
     {
       "name": "a request without an id is rejected",
       "valid": false,
-      "json": { "verb": "status" }
+      "json": {
+        "verb": "status"
+      }
     },
     {
       "name": "a negative id is rejected",
       "valid": false,
-      "json": { "id": -1, "verb": "status" }
+      "json": {
+        "id": -1,
+        "verb": "status"
+      }
     },
     {
       "name": "unlock without a passphrase is rejected",
       "valid": false,
-      "json": { "id": 15, "verb": "unlock" }
+      "json": {
+        "id": 15,
+        "verb": "unlock"
+      }
     },
     {
       "name": "search without an origin is rejected",
       "valid": false,
-      "json": { "id": 16, "verb": "search" }
+      "json": {
+        "id": 16,
+        "verb": "search"
+      }
     },
     {
       "name": "get with an empty entry name is rejected",
       "valid": false,
-      "json": { "id": 17, "verb": "get", "entry": "" }
+      "json": {
+        "id": 17,
+        "verb": "get",
+        "entry": ""
+      }
     },
     {
       "name": "generate below the minimum length is rejected",
       "valid": false,
-      "json": { "id": 18, "verb": "generate", "length": 3, "symbols": false }
+      "json": {
+        "id": 18,
+        "verb": "generate",
+        "length": 3,
+        "symbols": false
+      }
     },
     {
       "name": "generate above the maximum length is rejected",
       "valid": false,
-      "json": { "id": 19, "verb": "generate", "length": 1025, "symbols": false }
+      "json": {
+        "id": 19,
+        "verb": "generate",
+        "length": 1025,
+        "symbols": false
+      }
+    },
+    {
+      "name": "insert creates a card, whose secret is its number",
+      "valid": true,
+      "json": {
+        "id": 11,
+        "verb": "insert",
+        "entry": "cards/visa",
+        "kind": "card",
+        "secret": "4111111111111111",
+        "fields": [
+          {
+            "key": "cardholder",
+            "value": "Sana Qureshi"
+          },
+          {
+            "key": "exp-month",
+            "value": "04"
+          },
+          {
+            "key": "exp-year",
+            "value": "2029"
+          },
+          {
+            "key": "brand",
+            "value": "Visa"
+          }
+        ]
+      }
+    },
+    {
+      "name": "insert creates an identity, which has no secret at all",
+      "valid": true,
+      "json": {
+        "id": 12,
+        "verb": "insert",
+        "entry": "me/home",
+        "kind": "identity",
+        "fields": [
+          {
+            "key": "given-name",
+            "value": "Sana"
+          },
+          {
+            "key": "family-name",
+            "value": "Qureshi"
+          },
+          {
+            "key": "country",
+            "value": "Bangladesh"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a field key that is not a bare token is rejected",
+      "valid": false,
+      "json": {
+        "id": 13,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "secret": "hunter2",
+        "fields": [
+          {
+            "key": "Given Name",
+            "value": "Sana"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a field may not smuggle the type line, which the kind owns",
+      "valid": false,
+      "json": {
+        "id": 14,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "secret": "hunter2",
+        "fields": [
+          {
+            "key": "type",
+            "value": "card"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an unknown kind is rejected rather than written as a type line",
+      "valid": false,
+      "json": {
+        "id": 15,
+        "verb": "insert",
+        "entry": "web/example.com",
+        "kind": "telepathy",
+        "secret": "hunter2"
+      }
+    },
+    {
+      "name": "update rewrites the fields it names and leaves the rest alone (ADR-0009)",
+      "valid": true,
+      "json": {
+        "id": 16,
+        "verb": "update",
+        "entry": "web/example.com",
+        "fields": [
+          {
+            "key": "username",
+            "value": "someone@else"
+          }
+        ]
+      }
+    },
+    {
+      "name": "update may replace the secret on its own",
+      "valid": true,
+      "json": {
+        "id": 17,
+        "verb": "update",
+        "entry": "web/example.com",
+        "secret": "new-password"
+      }
+    },
+    {
+      "name": "update may clear a field by writing it empty",
+      "valid": true,
+      "json": {
+        "id": 18,
+        "verb": "update",
+        "entry": "web/example.com",
+        "fields": [
+          {
+            "key": "totp",
+            "value": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "update that changes nothing is rejected",
+      "valid": false,
+      "json": {
+        "id": 19,
+        "verb": "update",
+        "entry": "web/example.com"
+      }
+    },
+    {
+      "name": "items asks for the entries of a kind, names and hints only",
+      "valid": true,
+      "json": {
+        "id": 20,
+        "verb": "items",
+        "kinds": [
+          "card",
+          "identity"
+        ]
+      }
+    },
+    {
+      "name": "items with no kinds asks for everything",
+      "valid": true,
+      "json": {
+        "id": 21,
+        "verb": "items"
+      }
+    },
+    {
+      "name": "items for a kind this protocol does not define is rejected",
+      "valid": false,
+      "json": {
+        "id": 22,
+        "verb": "items",
+        "kinds": [
+          "ssh-key"
+        ]
+      }
     }
   ],
   "responses": [
@@ -157,7 +420,7 @@
         "id": 1,
         "ok": true,
         "verb": "hello",
-        "version": 1,
+        "version": 2,
         "store": "ready"
       }
     },
@@ -168,7 +431,7 @@
         "id": 1,
         "ok": true,
         "verb": "hello",
-        "version": 1,
+        "version": 2,
         "store": "missing"
       }
     },
@@ -208,7 +471,12 @@
     {
       "name": "lock succeeds",
       "valid": true,
-      "json": { "id": 4, "ok": true, "verb": "lock", "state": "locked" }
+      "json": {
+        "id": 4,
+        "ok": true,
+        "verb": "lock",
+        "state": "locked"
+      }
     },
     {
       "name": "list returns names only, never secrets",
@@ -217,7 +485,11 @@
         "id": 5,
         "ok": true,
         "verb": "list",
-        "entries": ["web/github.com", "web/google.com", "mail/fastmail"]
+        "entries": [
+          "web/github.com",
+          "web/google.com",
+          "mail/fastmail"
+        ]
       }
     },
     {
@@ -230,15 +502,19 @@
         "matches": [
           {
             "name": "web/google.com",
+            "kind": "login",
             "username": "sana@example.com",
             "url": "https://google.com"
           },
-          { "name": "web/google.com-work" }
+          {
+            "name": "web/google.com-work",
+            "kind": "login"
+          }
         ]
       }
     },
     {
-      "name": "get returns one entry's secret",
+      "name": "get returns one entry: its kind, its secret and its fields",
       "valid": true,
       "json": {
         "id": 7,
@@ -246,21 +522,38 @@
         "verb": "get",
         "entry": {
           "name": "web/google.com",
-          "password": "hunter2",
-          "username": "sana@example.com",
-          "url": "https://google.com",
-          "totp": "otpauth://totp/google?secret=JBSWY3DPEHPK3PXP"
+          "kind": "login",
+          "secret": "hunter2",
+          "fields": [
+            {
+              "key": "username",
+              "value": "sana@example.com"
+            },
+            {
+              "key": "url",
+              "value": "https://google.com"
+            },
+            {
+              "key": "totp",
+              "value": "otpauth://totp/google?secret=JBSWY3DPEHPK3PXP"
+            }
+          ]
         }
       }
     },
     {
-      "name": "get returns an entry that carries nothing but a password",
+      "name": "get returns an entry that carries nothing but a secret",
       "valid": true,
       "json": {
         "id": 7,
         "ok": true,
         "verb": "get",
-        "entry": { "name": "web/minimal.example", "password": "hunter2" }
+        "entry": {
+          "name": "web/minimal.example",
+          "kind": "login",
+          "secret": "hunter2",
+          "fields": []
+        }
       }
     },
     {
@@ -301,7 +594,10 @@
       "json": {
         "id": 7,
         "ok": false,
-        "error": { "code": "locked", "message": "the store is locked" }
+        "error": {
+          "code": "locked",
+          "message": "the store is locked"
+        }
       }
     },
     {
@@ -319,7 +615,12 @@
     {
       "name": "a response without ok is rejected",
       "valid": false,
-      "json": { "id": 2, "verb": "status", "state": "locked", "expiresIn": 0 }
+      "json": {
+        "id": 2,
+        "verb": "status",
+        "state": "locked",
+        "expiresIn": 0
+      }
     },
     {
       "name": "an unknown error code is rejected",
@@ -327,7 +628,10 @@
       "json": {
         "id": 7,
         "ok": false,
-        "error": { "code": "sadness", "message": "oh no" }
+        "error": {
+          "code": "sadness",
+          "message": "oh no"
+        }
       }
     },
     {
@@ -344,16 +648,127 @@
     {
       "name": "a list entry that is not a string is rejected",
       "valid": false,
-      "json": { "id": 5, "ok": true, "verb": "list", "entries": ["web/ok", 7] }
+      "json": {
+        "id": 5,
+        "ok": true,
+        "verb": "list",
+        "entries": [
+          "web/ok",
+          7
+        ]
+      }
     },
     {
-      "name": "a get response without a password is rejected",
+      "name": "a get response without a secret is rejected",
       "valid": false,
       "json": {
         "id": 7,
         "ok": true,
         "verb": "get",
-        "entry": { "name": "web/google.com" }
+        "entry": {
+          "name": "web/google.com",
+          "kind": "login",
+          "fields": []
+        }
+      }
+    },
+    {
+      "name": "get returns a card, whose secret is its number",
+      "valid": true,
+      "json": {
+        "id": 11,
+        "ok": true,
+        "verb": "get",
+        "entry": {
+          "name": "cards/visa",
+          "kind": "card",
+          "secret": "4111111111111111",
+          "fields": [
+            {
+              "key": "cardholder",
+              "value": "Sana Qureshi"
+            },
+            {
+              "key": "exp-month",
+              "value": "04"
+            },
+            {
+              "key": "exp-year",
+              "value": "2029"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "get returns an identity, which has an empty secret",
+      "valid": true,
+      "json": {
+        "id": 12,
+        "ok": true,
+        "verb": "get",
+        "entry": {
+          "name": "me/home",
+          "kind": "identity",
+          "secret": "",
+          "fields": [
+            {
+              "key": "given-name",
+              "value": "Sana"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "items returns names, kinds and a hint that is never a secret",
+      "valid": true,
+      "json": {
+        "id": 20,
+        "ok": true,
+        "verb": "items",
+        "items": [
+          {
+            "name": "cards/visa",
+            "kind": "card",
+            "hint": "Visa •••• 1111"
+          },
+          {
+            "name": "me/home",
+            "kind": "identity",
+            "hint": "Sana Qureshi"
+          },
+          {
+            "name": "web/minimal.example",
+            "kind": "login"
+          }
+        ]
+      }
+    },
+    {
+      "name": "update confirms the entry it rewrote, and nothing else",
+      "valid": true,
+      "json": {
+        "id": 16,
+        "ok": true,
+        "verb": "update",
+        "entry": "web/example.com"
+      }
+    },
+    {
+      "name": "an item hint may not carry a secret field",
+      "valid": false,
+      "json": {
+        "id": 20,
+        "ok": true,
+        "verb": "items",
+        "items": [
+          {
+            "name": "cards/visa",
+            "kind": "card",
+            "secret": "4111111111111111"
+          }
+        ]
       }
     }
   ]
