@@ -200,20 +200,11 @@ export default defineBackground(() => {
           return { kind: "password", ok: true, password: reply.password };
         }
 
-        case "save": {
-          // The only request that changes anything. It reaches the host from
-          // the popup and from nowhere else — `ContentRequest` has no `save`,
-          // so a page's script cannot put an entry into the store even if it
-          // guessed the shape (ADR-0006).
-          const reply = await client.request({
-            entry: request.entry,
-            password: request.password,
-            url: request.url,
-            username: request.username,
-            verb: "insert",
-          });
-          return { entry: reply.entry, kind: "saved", ok: true };
-        }
+        case "save":
+        case "update":
+        case "items":
+        case "wallet":
+          return await records(request);
 
         case "captured":
         case "saveCaptured":
@@ -246,6 +237,72 @@ export default defineBackground(() => {
         "internal",
         error instanceof Error ? error.message : String(error)
       );
+    }
+  }
+
+
+  /**
+   * The verbs that read or write a record.
+   *
+   * `save` and `update` are the popup's alone — a page's script cannot reach
+   * either (ADR-0006, ADR-0009) — and `wallet` is the one a content script may
+   * ask, for the two kinds that belong to no site.
+   */
+  async function records(
+    request: Extract<
+      ExtensionRequest,
+      { kind: "items" | "save" | "update" | "wallet" }
+    >
+  ): Promise<ExtensionReply> {
+    switch (request.kind) {
+      case "save": {
+        // Creating reaches the host from the popup and from nowhere else —
+        // `ContentRequest` has no `save`, so a page's script cannot put an
+        // entry into the store even if it guessed the shape (ADR-0006).
+        const reply = await client.request({
+          entry: request.entry,
+          verb: "insert",
+          ...(request.kind ? { kind: request.kind } : {}),
+          ...(request.secret === undefined ? {} : { secret: request.secret }),
+          ...(request.fields ? { fields: request.fields } : {}),
+        });
+        return { entry: reply.entry, kind: "saved", ok: true };
+      }
+
+      case "update": {
+        // Rewriting is the popup's alone, behind the confirmation on the
+        // entry screen (ADR-0009). It names fields; the host leaves every
+        // line it was not told about exactly where it is.
+        const reply = await client.request({
+          entry: request.entry,
+          verb: "update",
+          ...(request.secret === undefined ? {} : { secret: request.secret }),
+          ...(request.fields ? { fields: request.fields } : {}),
+        });
+        return { entry: reply.entry, kind: "saved", ok: true };
+      }
+
+      case "items": {
+        const reply = await client.request({
+          verb: "items",
+          ...(request.kinds ? { kinds: request.kinds } : {}),
+        });
+        return { items: reply.items, kind: "items", ok: true };
+      }
+
+      case "wallet": {
+        // A content script may ask for these two kinds and no others: a
+        // card and an identity belong to no site, so `search` cannot offer
+        // them, and enumerating logins is what its vocabulary exists to
+        // prevent.
+        const reply = await client.request({
+          kinds: ["card", "identity"],
+          verb: "items",
+        });
+        return { items: reply.items, kind: "items", ok: true };
+      }
+      default:
+        return failure("bad_request", "unknown request");
     }
   }
 
