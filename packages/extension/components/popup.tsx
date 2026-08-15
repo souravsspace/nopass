@@ -1,4 +1,9 @@
-import type { Match, Secret } from "@nopass/protocol";
+import {
+  MAX_PASSWORD_LENGTH,
+  type Match,
+  MIN_PASSWORD_LENGTH,
+  type Secret,
+} from "@nopass/protocol";
 import { Button } from "@nopass/ui/components/button";
 import { Input } from "@nopass/ui/components/input";
 import { Spinner } from "@nopass/ui/components/spinner";
@@ -9,6 +14,7 @@ import {
   ChevronRight,
   Copy,
   Database,
+  Dices,
   Eye,
   EyeOff,
   Lock,
@@ -27,6 +33,9 @@ import { initialSession } from "../lib/session";
 
 /** How long the "copied" / "filled" note stays up. */
 const TOAST_MS = 2000;
+
+/** What the generator offers before anyone touches the box. */
+const DEFAULT_PASSWORD_LENGTH = 20;
 
 /**
  * Which screen the popup is on.
@@ -1014,6 +1023,25 @@ function NewLogin({
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
   const [taken, setTaken] = useState(false);
+  const [length, setLength] = useState(DEFAULT_PASSWORD_LENGTH);
+  const [symbols, setSymbols] = useState(true);
+
+  /**
+   * A password nobody has to think of.
+   *
+   * The host makes it, from the same generator `nopass generate` uses, and it
+   * is shown rather than masked: this is the one moment the user has to be
+   * able to read what they are about to be committed to.
+   */
+  const onGenerate = async () => {
+    setRefused(null);
+    try {
+      setPassword(await bridge.generate(length, symbols));
+      setShown(true);
+    } catch (error) {
+      setRefused(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1095,6 +1123,14 @@ function NewLogin({
               )}
             </Button>
           </div>
+
+          <GeneratorRow
+            length={length}
+            onGenerate={() => void onGenerate()}
+            onLength={setLength}
+            onSymbols={setSymbols}
+            symbols={symbols}
+          />
         </div>
 
         <Field
@@ -1126,6 +1162,81 @@ function NewLogin({
       </form>
     </>
   );
+}
+
+/**
+ * Make one up instead of thinking of one.
+ *
+ * The length and the symbols are the only two things worth deciding here, and
+ * both are what `nopass generate` asks for, so the two ways of creating an
+ * entry produce the same passwords.
+ */
+function GeneratorRow({
+  length,
+  symbols,
+  onLength,
+  onSymbols,
+  onGenerate,
+}: {
+  length: number;
+  symbols: boolean;
+  onLength: (next: number) => void;
+  onSymbols: (next: boolean) => void;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        className="h-7 flex-none border-border-strong bg-card px-2.5 font-semibold text-[12px]"
+        onClick={onGenerate}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <Dices className="size-3.5" />
+        Generate
+      </Button>
+
+      <label
+        className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+        htmlFor="np-length"
+      >
+        Length
+        <input
+          className="h-7 w-14 rounded-md border bg-muted px-1.5 text-center font-mono text-[11px] text-foreground"
+          id="np-length"
+          max={MAX_PASSWORD_LENGTH}
+          min={MIN_PASSWORD_LENGTH}
+          onChange={(event) => onLength(clampLength(event.target.value))}
+          type="number"
+          value={length}
+        />
+      </label>
+
+      <label
+        className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+        htmlFor="np-symbols"
+      >
+        <input
+          checked={symbols}
+          className="size-3.5 accent-primary"
+          id="np-symbols"
+          onChange={(event) => onSymbols(event.target.checked)}
+          type="checkbox"
+        />
+        Symbols
+      </label>
+    </div>
+  );
+}
+
+/** Keep the length inside what the host will accept, whatever was typed. */
+function clampLength(raw: string): number {
+  const asked = Number.parseInt(raw, 10);
+  if (Number.isNaN(asked)) {
+    return DEFAULT_PASSWORD_LENGTH;
+  }
+  return Math.min(Math.max(asked, MIN_PASSWORD_LENGTH), MAX_PASSWORD_LENGTH);
 }
 
 function Field({
