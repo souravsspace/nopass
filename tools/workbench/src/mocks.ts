@@ -104,6 +104,19 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
       log(`fill(${entry})`);
       return Promise.resolve();
     },
+    generate(length: number, symbols: boolean) {
+      log(`generate(${length}, symbols: ${symbols})`);
+      // The real one is the host's CSPRNG. This one only has to be long
+      // enough, and different every time, to see the screen behave.
+      const alphabet = symbols
+        ? "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_"
+        : "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const made = Array.from(
+        { length },
+        () => alphabet[Math.floor(Math.random() * alphabet.length)]
+      ).join("");
+      return Promise.resolve(made);
+    },
     list() {
       log("list()");
       return Promise.resolve(ENTRIES.map((entry) => entry.name));
