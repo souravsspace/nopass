@@ -170,6 +170,29 @@ impl Record {
         Ok(())
     }
 
+    /// Write a field that has more than one accepted spelling.
+    ///
+    /// The spelling already in the body wins: an entry that says `email:`
+    /// keeps saying `email:` after an edit, rather than growing a second line
+    /// that means the same thing and letting first-occurrence decide which one
+    /// counts. An empty value clears every spelling.
+    pub fn set_alias(&mut self, canonical: &str, aliases: &[&str], value: &str) -> Result<()> {
+        check_one_line(value)?;
+
+        if value.trim().is_empty() {
+            for alias in aliases {
+                self.remove(alias);
+            }
+            return Ok(());
+        }
+
+        let existing = self.lines.iter().find_map(|line| match line {
+            Line::Pair(key, _) if aliases.contains(&key.as_str()) => Some(key.clone()),
+            _ => None,
+        });
+        self.set(existing.as_deref().unwrap_or(canonical), value)
+    }
+
     /// Drop every line written under `key`.
     pub fn remove(&mut self, key: &str) {
         let key = key.trim().to_ascii_lowercase();
@@ -335,6 +358,46 @@ mod tests {
         let mut record = Record::parse("pw\nuser: a\nurl: https://a.b\nuser: b\n");
         record.remove("user");
         assert_eq!(record.render(), "pw\nurl: https://a.b\n");
+    }
+
+    #[test]
+    fn writing_a_canonical_key_replaces_the_alias_that_was_already_there() {
+        // An entry written by hand says `email:`; an edit that meant the same
+        // field must not leave both spellings behind for `get` to choose
+        // between.
+        let mut record = Record::parse("pw\nemail: old@example.com\nurl: https://a.b\n");
+        record
+            .set_alias(
+                "username",
+                &["username", "user", "login", "email"],
+                "new@example.com",
+            )
+            .expect("one line");
+
+        assert_eq!(
+            record.render(),
+            "pw\nemail: new@example.com\nurl: https://a.b\n"
+        );
+    }
+
+    #[test]
+    fn writing_a_canonical_key_with_no_alias_present_appends_the_canonical_one() {
+        let mut record = Record::parse("pw\n");
+        record
+            .set_alias("username", &["username", "user", "login", "email"], "sana")
+            .expect("one line");
+
+        assert_eq!(record.render(), "pw\nusername: sana\n");
+    }
+
+    #[test]
+    fn clearing_a_field_removes_every_spelling_of_it() {
+        let mut record = Record::parse("pw\nemail: a@b.c\nuser: d\n");
+        record
+            .set_alias("username", &["username", "user", "login", "email"], "")
+            .expect("one line");
+
+        assert_eq!(record.render(), "pw\n");
     }
 
     #[test]
