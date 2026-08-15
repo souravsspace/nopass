@@ -90,6 +90,20 @@ export interface FillCommand {
   secret: Secret;
 }
 
+/**
+ * The offer, pushed at whatever page the tab landed on.
+ *
+ * A sign-in that posts a form takes its page — and the prompt the reply would
+ * have raised — away with it. The background still has the login, so it puts
+ * the offer on the page that replaced it instead.
+ */
+export interface OfferCommand {
+  kind: "offerSave";
+  offer: SaveOffer;
+}
+
+export type BackgroundCommand = FillCommand | OfferCommand;
+
 export function failure(code: string, message: string): ExtensionFailure {
   return { code, message, ok: false };
 }
