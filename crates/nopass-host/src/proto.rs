@@ -5,11 +5,12 @@
 //! it, so neither can drift without the other going red.
 
 use anyhow::{bail, Result};
+use nopass_core::record;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 /// Bumped whenever a change would break an older extension.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Bounds on `generate`, so a typo cannot ask the host for a megabyte.
 pub const MIN_PASSWORD_LENGTH: usize = 8;
@@ -17,7 +18,8 @@ pub const MAX_PASSWORD_LENGTH: usize = 1024;
 
 /// The verbs this host knows about. Anything else is `unsupported_verb`.
 pub const KNOWN_VERBS: &[&str] = &[
-    "hello", "status", "unlock", "lock", "list", "search", "get", "generate", "insert",
+    "hello", "status", "unlock", "lock", "list", "search", "get", "generate", "items", "insert",
+    "update",
 ];
 
 /// Verbs a caller might reasonably expect but which this host refuses on
@@ -30,6 +32,9 @@ pub const KNOWN_VERBS: &[&str] = &[
 /// is already in the store, which is the part a compromised extension must
 /// never reach.
 pub const MUTATING_VERBS: &[&str] = &[
+    // `update` is how a field is rewritten now, one named field at a time,
+    // behind a confirmation (ADR-0009). `edit` stayed a whole-body replace
+    // with no such gate, and is still refused under that name.
     "edit",
     "rm",
     "remove",
@@ -82,10 +87,60 @@ macro_rules! literal_bool {
 literal_bool!(Yes, true);
 literal_bool!(No, false);
 
-/// Requests. Only one mutating verb exists, and it can only ever create:
-/// there is deliberately no variant for `edit`, `rm`, `mv` or `cp`, so nothing
-/// already in the store can be rewritten, moved or destroyed over this wire
-/// (ADR-0006, superseding ADR-0002 in that one respect).
+/// What an entry holds. Absent on the wire means [`Kind::Login`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    Login,
+    Card,
+    Identity,
+    Passkey,
+}
+
+impl Kind {
+    /// Whether this kind's first line is a secret. An identity has none.
+    fn bears_a_secret(self) -> bool {
+        !matches!(self, Kind::Identity)
+    }
+
+    pub fn as_record_kind(self) -> record::Kind {
+        match self {
+            Kind::Login => record::Kind::Login,
+            Kind::Card => record::Kind::Card,
+            Kind::Identity => record::Kind::Identity,
+            Kind::Passkey => record::Kind::Passkey,
+        }
+    }
+
+    /// A kind read off an entry. A `type:` line this build does not know
+    /// cannot be described on the wire, so the entry travels as a login and
+    /// keeps its own line untouched on the way back.
+    pub fn from_record_kind(kind: &record::Kind) -> Kind {
+        match kind {
+            record::Kind::Card => Kind::Card,
+            record::Kind::Identity => Kind::Identity,
+            record::Kind::Passkey => Kind::Passkey,
+            _ => Kind::Login,
+        }
+    }
+}
+
+/// One `key: value` line, in the canonical spelling.
+///
+/// The host resolves an entry's own spelling — `email:`, `user:` — into the
+/// canonical key on the way out, and writes back whichever spelling the entry
+/// already used, so the extension never needs an alias table.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Field {
+    pub key: String,
+    pub value: String,
+}
+
+/// Requests. Two mutating verbs exist: `insert` can only ever create, and
+/// `update` can only ever rewrite an entry that is already there. There is
+/// still no variant for `rm`, `mv` or `cp`, so nothing on this wire can move
+/// or destroy what is in the store (ADR-0006, ADR-0009).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
@@ -119,14 +174,29 @@ pub enum Request {
         length: usize,
         symbols: bool,
     },
+    Items {
+        id: u32,
+        /// Absent asks for every kind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kinds: Option<Vec<Kind>>,
+    },
     Insert {
         id: u32,
         entry: String,
-        password: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        username: Option<String>,
+        kind: Option<Kind>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        url: Option<String>,
+        secret: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fields: Option<Vec<Field>>,
+    },
+    Update {
+        id: u32,
+        entry: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        secret: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fields: Option<Vec<Field>>,
     },
 }
 
@@ -141,7 +211,9 @@ impl Request {
             | Self::Search { id, .. }
             | Self::Get { id, .. }
             | Self::Generate { id, .. }
-            | Self::Insert { id, .. } => id,
+            | Self::Items { id, .. }
+            | Self::Insert { id, .. }
+            | Self::Update { id, .. } => id,
         }
     }
 
@@ -161,36 +233,72 @@ impl Request {
             }
             Self::Insert {
                 entry,
-                password,
-                username,
-                url,
+                kind,
+                secret,
+                fields,
                 ..
             } => {
                 if entry.is_empty() {
                     bail!("entry must not be empty");
                 }
-                if password.is_empty() {
-                    bail!("password must not be empty");
+                if kind.unwrap_or(Kind::Login).bears_a_secret()
+                    && secret.as_deref().unwrap_or_default().is_empty()
+                {
+                    bail!("this kind of entry needs a secret on its first line");
                 }
-                // An entry body is `password\nkey: value\n…`, so a value
-                // carrying a newline could forge a second field — a `url:`
-                // line pointing somewhere the user never typed. That is a
-                // phishing primitive, not a formatting slip, so it is refused
-                // at the edge rather than escaped further in.
-                for (field, value) in [
-                    ("password", Some(password)),
-                    ("username", username.as_ref()),
-                    ("url", url.as_ref()),
-                ] {
-                    if value.is_some_and(|v| v.contains(['\n', '\r'])) {
-                        bail!("{field} must not contain a line break");
-                    }
+                check_body(secret.as_deref(), fields.as_deref())
+            }
+            Self::Update {
+                entry,
+                secret,
+                fields,
+                ..
+            } => {
+                if entry.is_empty() {
+                    bail!("entry must not be empty");
                 }
-                Ok(())
+                // An update that names nothing would decrypt and rewrite an
+                // entry to leave it exactly as it was.
+                if secret.is_none() && fields.as_ref().is_none_or(|f| f.is_empty()) {
+                    bail!("an update must change something");
+                }
+                check_body(secret.as_deref(), fields.as_deref())
             }
             _ => Ok(()),
         }
     }
+}
+
+/// The rules a body has to keep, whichever verb carries it.
+///
+/// An entry body is `secret\nkey: value\n…`, so a value carrying a newline
+/// could forge a second field — a `url:` line pointing somewhere the user
+/// never typed. That is a phishing primitive, not a formatting slip, so it is
+/// refused at the edge rather than escaped further in (ADR-0006). A key that
+/// is not a bare token could do the same with a colon, and `type:` is the line
+/// the kind owns, so a field may not write it.
+fn check_body(secret: Option<&str>, fields: Option<&[Field]>) -> Result<()> {
+    if secret.is_some_and(|value| value.contains(['\n', '\r'])) {
+        bail!("the secret must not contain a line break");
+    }
+    for field in fields.unwrap_or_default() {
+        if !is_field_key(&field.key) {
+            bail!("`{}` is not a field key", field.key);
+        }
+        if field.key == record::TYPE_KEY {
+            bail!("the kind is not a field");
+        }
+        if field.value.contains(['\n', '\r']) {
+            bail!("`{}` must not contain a line break", field.key);
+        }
+    }
+    Ok(())
+}
+
+fn is_field_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    chars.next().is_some_and(|first| first.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Whether the store exists at all, so the popup can offer `nopass init`.
@@ -213,24 +321,35 @@ pub enum LockState {
 #[serde(deny_unknown_fields)]
 pub struct Match {
     pub name: String,
+    pub kind: Kind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
-/// One entry's secret, handed over for a single fill.
+/// One entry, handed over for a single fill or for the entry screen.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Secret {
     pub name: String,
-    pub password: String,
+    pub kind: Kind,
+    /// The first line: a password, a card number, or empty for an identity.
+    pub secret: String,
+    pub fields: Vec<Field>,
+}
+
+/// A row for an entry that is not offered by origin — a card, an identity.
+///
+/// `hint` is what the row reads: a masked card tail, a person's name. The host
+/// builds it precisely so that offering the row costs no secret.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Item {
+    pub name: String,
+    pub kind: Kind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub totp: Option<String>,
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -281,9 +400,19 @@ pub enum Success {
         ok: Yes,
         password: String,
     },
+    Items {
+        id: u32,
+        ok: Yes,
+        items: Vec<Item>,
+    },
     /// The name back and nothing else: the popup asked for this write, so it
     /// already holds everything a fuller reply could tell it.
     Insert {
+        id: u32,
+        ok: Yes,
+        entry: String,
+    },
+    Update {
         id: u32,
         ok: Yes,
         entry: String,
