@@ -104,9 +104,9 @@ describe("loginFor", () => {
       <button id="go">Sign in</button>
     `);
 
-    expect(loginFor(document.querySelector("#go"), forms)?.password?.value).toBe(
-      "hunter2"
-    );
+    expect(
+      loginFor(document.querySelector("#go"), forms)?.password?.value
+    ).toBe("hunter2");
   });
 
   it("refuses to guess between two filled forms", () => {
