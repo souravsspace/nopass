@@ -33,13 +33,36 @@ export type PopupRequest =
 /**
  * The content script's vocabulary. Note the absence of `reveal`: a page's
  * script may cause a fill, but may never be handed a secret to read — and the
- * absence of `save`, so a page can never put anything into the store either
- * (ADR-0006).
+ * absence of `save`, which stays a popup-only word: what a content script may
+ * do is offer a login the user just typed, and then name one the background is
+ * already holding (ADR-0006, ADR-0007).
  */
 export type ContentRequest =
   | { kind: "session" }
   | { kind: "matches"; origin: string }
-  | { kind: "fillHere"; entry: string };
+  | { kind: "fillHere"; entry: string }
+  | ({ kind: "captured"; origin: string } & Captured)
+  | { kind: "saveCaptured"; entry: string }
+  | { kind: "dismissCaptured" };
+
+/** A login read off a page as it was submitted. */
+export interface Captured {
+  password: string;
+  username?: string;
+}
+
+/**
+ * What the background will let the page offer, if anything.
+ *
+ * Null when there is nothing to ask about: the store is locked, or this login
+ * is already in it under this username, and a prompt for either would be noise
+ * over a page the user is trying to leave.
+ */
+export interface SaveOffer {
+  host: string;
+  suggestion: string;
+  username?: string;
+}
 
 export type ExtensionRequest = PopupRequest | ContentRequest;
 
@@ -50,6 +73,7 @@ export type ExtensionSuccess =
   | { ok: true; kind: "secret"; secret: Secret }
   | { ok: true; kind: "password"; password: string }
   | { ok: true; kind: "saved"; entry: string }
+  | { ok: true; kind: "offer"; offer: SaveOffer | null }
   | { ok: true; kind: "done" };
 
 export interface ExtensionFailure {
