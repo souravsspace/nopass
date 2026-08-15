@@ -53,7 +53,7 @@ rustPlatform.buildRustPackage rec {
     description = "Fast, self-contained password manager";
     homepage = "https://github.com/souravsspace/nopass";
     changelog = "https://github.com/souravsspace/nopass/releases/tag/v${version}";
-    license = lib.licenses.mit;
+    license = lib.licenses.agpl3Only;
     mainProgram = "nopass";
     platforms = lib.platforms.unix;
   };
