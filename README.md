@@ -517,4 +517,5 @@ architecture in diagrams: every component, boundary and decision on one page.
 
 ## License
 
-MIT.
+[GNU AGPLv3](LICENSE). Running a modified nopass as a network
+service means offering its source to the people who use it.
