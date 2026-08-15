@@ -13,6 +13,7 @@ the browser.
 - [Install it](#install-it)
 - [Using the popup](#using-the-popup)
 - [The inline dropdown](#the-inline-dropdown)
+- [The save prompt](#the-save-prompt)
 - [What the popup asks the host for](#what-the-popup-asks-the-host-for)
 - [The workbench](#the-workbench)
 - [Design system](#design-system)
@@ -136,10 +137,35 @@ Focus a login field on a page and nopass offers its matches inline, under the
 field. It renders into a closed shadow root, so the page can neither read it nor
 restyle it. Picking a row fills the form.
 
+A sign-in that asks for the account name first and the password on a second
+screen is offered on that first field too; filling there writes the username
+and waits for the password box to appear.
+
+An entry is offered on a page when its `url:` line names that host, or when its
+name ends in it. Neither is required to be the other, so `work/intranet` with a
+`url:` line is matched on the URL alone.
+
 It carries the same palette as the popup, written out by hand: a shadow root
 sees neither Tailwind nor an `@font-face` rule. **If you change a colour in
 `packages/ui/src/styles/globals.css`, change it in
-`packages/extension/lib/dropdown.ts` too.**
+`packages/extension/lib/dropdown.ts` and `packages/extension/lib/prompt.ts`
+too.**
+
+## The save prompt
+
+Sign in with a login that is not in your store and nopass asks, in the top
+right of the page, whether to save it. The name box is pre-filled with
+`web/<host>` and is yours to rewrite — save it under any name you like. **Save**
+writes it; **Not now** throws it away.
+
+Nothing is asked when the store is locked, or when that site already has an
+entry under the same username. Nothing is written until you press Save: the
+password sits in the extension's background memory while the prompt is up, and
+closing the tab discards it. The message that accepts the offer carries only a
+name ([ADR-0007](docs/adr/0007-saving-a-login-from-the-page.md)).
+
+A name that is already taken is refused, with the reason shown in the prompt
+and your typed name still there.
 
 ## What the popup asks the host for
 
@@ -154,12 +180,14 @@ reached.
 | `search` | Matches for an origin — **no secret** | "This page" |
 | `list` | Every entry name — **no secret** | "All items" |
 | `get` | One entry's secret | Fill, copy, the entry screen |
-| `insert` | The name it created — **create only** | "New login" |
+| `generate` | A fresh random password | **Generate** on "New login" |
+| `insert` | The name it created — **create only** | "New login", the save prompt |
 
 The content script's vocabulary is narrower than the popup's on purpose: it may
-cause a fill and look up matches, but it may never be handed a secret to read,
-it cannot enumerate the store, and it has no `save` — a page's script cannot
-put an entry into your store even if it guessed the shape.
+cause a fill, look up matches, and offer a login that was just submitted, but it
+may never be handed a secret to read, and it cannot enumerate the store. It has
+no `save`: what it can do is name a login the background is already holding for
+its own tab, which the user has seen and can rewrite.
 
 ## Viewing and adding
 
@@ -172,6 +200,11 @@ The **+** in the header opens **New login**, pre-filled with the current tab's
 host as the name and its origin as the website — so the usual case is a
 password and a Save. The name is what makes a later fill match: end it in the
 site's host, or let the `url:` line do it.
+
+**Generate** makes the password instead of asking you for one, with a length
+and a symbols switch beside it. It is the host's generator — the one behind
+`nopass generate`, on the same OS entropy — and the result is shown rather than
+masked, because this is the one moment it is worth reading.
 
 Saving requires the store to be **unlocked**, and refuses a name that already
 exists. To change or remove an entry, use `nopass edit` or `nopass rm`.
