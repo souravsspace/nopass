@@ -9,7 +9,7 @@
 //! Only the reading lives here. What a field *means* to a login form is the
 //! extension's business, and what it means on disk is [`crate::record`]'s.
 
-use crate::record::Record;
+use crate::record::{Kind, Record};
 
 pub const USERNAME_KEYS: &[&str] = &["username", "user", "login", "email"];
 pub const URL_KEYS: &[&str] = &["url", "website", "site"];
@@ -44,6 +44,80 @@ pub const PASSKEY_USER_HANDLE_KEYS: &[&str] = &["user-handle", "user-id"];
 pub const PASSKEY_CREDENTIAL_KEYS: &[&str] = &["credential-id", "credential", "id"];
 pub const PASSKEY_ALG_KEYS: &[&str] = &["alg", "algorithm"];
 pub const PASSKEY_COUNTER_KEYS: &[&str] = &["counter", "sign-count"];
+
+/// One field a kind claims: the name it is written under when nopass writes
+/// it, and every spelling it is recognised by when someone else did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldSpec {
+    pub key: &'static str,
+    pub aliases: &'static [&'static str],
+}
+
+const fn spec(key: &'static str, aliases: &'static [&'static str]) -> FieldSpec {
+    FieldSpec { key, aliases }
+}
+
+const LOGIN_FIELDS: &[FieldSpec] = &[
+    spec("username", USERNAME_KEYS),
+    spec("url", URL_KEYS),
+    spec("totp", TOTP_KEYS),
+];
+
+const CARD_FIELDS: &[FieldSpec] = &[
+    spec("cardholder", CARDHOLDER_KEYS),
+    spec("exp-month", CARD_EXP_MONTH_KEYS),
+    spec("exp-year", CARD_EXP_YEAR_KEYS),
+    spec("cvv", CARD_CVV_KEYS),
+    spec("brand", CARD_BRAND_KEYS),
+    spec("zip", CARD_ZIP_KEYS),
+];
+
+const IDENTITY_FIELDS: &[FieldSpec] = &[
+    spec("given-name", GIVEN_NAME_KEYS),
+    spec("family-name", FAMILY_NAME_KEYS),
+    spec("email", EMAIL_KEYS),
+    spec("phone", PHONE_KEYS),
+    spec("birthday", BIRTHDAY_KEYS),
+    spec("age", AGE_KEYS),
+    spec("street", STREET_KEYS),
+    spec("street2", STREET2_KEYS),
+    spec("city", CITY_KEYS),
+    spec("region", REGION_KEYS),
+    spec("postcode", POSTCODE_KEYS),
+    spec("country", COUNTRY_KEYS),
+    spec("organization", ORGANIZATION_KEYS),
+];
+
+const PASSKEY_FIELDS: &[FieldSpec] = &[
+    spec("rp", PASSKEY_RP_KEYS),
+    spec("user", PASSKEY_USER_KEYS),
+    spec("user-handle", PASSKEY_USER_HANDLE_KEYS),
+    spec("credential-id", PASSKEY_CREDENTIAL_KEYS),
+    spec("alg", PASSKEY_ALG_KEYS),
+    spec("counter", PASSKEY_COUNTER_KEYS),
+];
+
+/// The fields `kind` claims, in the order a screen should show them.
+pub fn spec_for(kind: &Kind) -> &'static [FieldSpec] {
+    match kind {
+        Kind::Login => LOGIN_FIELDS,
+        Kind::Card => CARD_FIELDS,
+        Kind::Identity => IDENTITY_FIELDS,
+        Kind::Passkey => PASSKEY_FIELDS,
+        // A kind this build has never heard of claims nothing, so its lines
+        // travel as themselves and come back unchanged.
+        Kind::Other(_) => &[],
+    }
+}
+
+/// Every spelling of a canonical key, whichever kind claims it.
+pub fn aliases_for(key: &str) -> Option<&'static [&'static str]> {
+    [LOGIN_FIELDS, CARD_FIELDS, IDENTITY_FIELDS, PASSKEY_FIELDS]
+        .into_iter()
+        .flatten()
+        .find(|field| field.key == key)
+        .map(|field| field.aliases)
+}
 
 /// A login: what the browser fills into a sign-in form.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -328,6 +402,63 @@ mod tests {
         let identity = identity(&parsed("\ntype: identity\ndob: 1996-04-02\nage: 30\n"));
         assert_eq!(identity.birthday.as_deref(), Some("1996-04-02"));
         assert_eq!(identity.age.as_deref(), Some("30"));
+    }
+
+    #[test]
+    fn every_kind_names_the_fields_it_claims() {
+        let login: Vec<&str> = spec_for(&Kind::Login).iter().map(|f| f.key).collect();
+        assert_eq!(login, vec!["username", "url", "totp"]);
+
+        let card: Vec<&str> = spec_for(&Kind::Card).iter().map(|f| f.key).collect();
+        assert!(card.contains(&"cardholder"), "{card:?}");
+        assert!(card.contains(&"exp-month"), "{card:?}");
+        assert!(card.contains(&"cvv"), "{card:?}");
+
+        let identity: Vec<&str> = spec_for(&Kind::Identity).iter().map(|f| f.key).collect();
+        assert!(identity.contains(&"given-name"), "{identity:?}");
+        assert!(identity.contains(&"country"), "{identity:?}");
+    }
+
+    #[test]
+    fn a_canonical_key_is_the_first_of_its_own_aliases() {
+        // Otherwise writing a field into an entry that has none of its
+        // spellings would write a key that reading it back would not find.
+        for kind in [Kind::Login, Kind::Card, Kind::Identity, Kind::Passkey] {
+            for field in spec_for(&kind) {
+                assert!(
+                    field.aliases.contains(&field.key),
+                    "{} is not among its own aliases",
+                    field.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_canonical_key_is_a_bare_token_the_wire_will_accept() {
+        for kind in [Kind::Login, Kind::Card, Kind::Identity, Kind::Passkey] {
+            for field in spec_for(&kind) {
+                // The wire's rule: a lower-case letter, then letters, digits
+                // and hyphens. `street2` is why the digits are allowed.
+                let mut chars = field.key.chars();
+                assert!(
+                    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                    "{} is not a bare token",
+                    field.key
+                );
+                assert_ne!(field.key, "type", "the kind is not a field");
+            }
+        }
+    }
+
+    #[test]
+    fn a_key_can_be_looked_up_to_find_the_spellings_it_stands_for() {
+        assert_eq!(
+            aliases_for("username"),
+            Some(&["username", "user", "login", "email"][..])
+        );
+        assert_eq!(aliases_for("notes"), None);
     }
 
     #[test]
