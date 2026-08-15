@@ -10,6 +10,7 @@ pub mod generate;
 pub mod git;
 pub mod lock;
 pub mod paths;
+pub mod record;
 pub mod store;
 
 pub use crypto::{Crypto, GpgCrypto, NativeCrypto, PlainCrypto};
