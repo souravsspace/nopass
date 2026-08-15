@@ -66,6 +66,22 @@ fn reply(host: &mut Host, request: Value) -> Value {
     response
 }
 
+/// One canonical field out of a `get` reply.
+fn field<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
+    entry["fields"]
+        .as_array()?
+        .iter()
+        .find(|field| field["key"] == json!(key))?["value"]
+        .as_str()
+}
+
+/// The entry as it sits on disk, read through a second handle on the same
+/// store — what the host wrote is the thing under test.
+fn body_of(root: &std::path::Path, name: &str) -> String {
+    let store = Store::open(root, Box::new(PlainCrypto));
+    String::from_utf8(store.show(name).expect("the entry reads back")).expect("utf-8")
+}
+
 fn error_code(response: &Value) -> &str {
     response["error"]["code"]
         .as_str()
@@ -168,12 +184,13 @@ fn get_returns_the_password_and_the_metadata_around_it() {
     );
 
     let entry = &response["entry"];
-    assert_eq!(entry["password"], json!("hunter2"));
-    assert_eq!(entry["username"], json!("sana@example.com"));
-    assert_eq!(entry["url"], json!("https://google.com"));
+    assert_eq!(entry["kind"], json!("login"));
+    assert_eq!(entry["secret"], json!("hunter2"));
+    assert_eq!(field(entry, "username"), Some("sana@example.com"));
+    assert_eq!(field(entry, "url"), Some("https://google.com"));
     assert_eq!(
-        entry["totp"],
-        json!("otpauth://totp/g?secret=JBSWY3DPEHPK3PXP")
+        field(entry, "totp"),
+        Some("otpauth://totp/g?secret=JBSWY3DPEHPK3PXP")
     );
 }
 
@@ -185,8 +202,8 @@ fn get_returns_an_entry_that_is_only_a_password() {
         json!({ "id": 6, "verb": "get", "entry": "mail/fastmail" }),
     );
 
-    assert_eq!(response["entry"]["password"], json!("fm-pw"));
-    assert!(response["entry"].get("username").is_none());
+    assert_eq!(response["entry"]["secret"], json!("fm-pw"));
+    assert_eq!(response["entry"]["fields"], json!([]));
 }
 
 #[test]
@@ -250,9 +267,10 @@ fn a_mutating_verb_is_refused_and_changes_nothing() {
     let (_dir, mut host) = sample();
     let before = reply(&mut host, json!({ "id": 13, "verb": "list" }));
 
-    // `insert` is deliberately absent: it is the one write this host performs,
-    // and it can only ever create (ADR-0006). Everything here would reach
-    // something already in the store.
+    // `insert` and `update` are deliberately absent: creating is gated on the
+    // name being free (ADR-0006) and rewriting on the entry already existing
+    // and a confirmation in the UI (ADR-0009). Everything here would move or
+    // destroy what is in the store.
     for verb in ["edit", "rm", "mv", "cp", "delete", "init"] {
         let response = reply(
             &mut host,
@@ -279,9 +297,11 @@ fn insert_creates_an_entry_the_next_get_can_read_back() {
             "id": 20,
             "verb": "insert",
             "entry": "web/example.com",
-            "password": "hunter2",
-            "username": "sana@example.com",
-            "url": "https://example.com/login",
+            "secret": "hunter2",
+            "fields": [
+                { "key": "username", "value": "sana@example.com" },
+                { "key": "url", "value": "https://example.com/login" },
+            ],
         }),
     );
     assert_eq!(response["ok"], json!(true));
@@ -293,9 +313,12 @@ fn insert_creates_an_entry_the_next_get_can_read_back() {
         &mut host,
         json!({ "id": 21, "verb": "get", "entry": "web/example.com" }),
     );
-    assert_eq!(got["entry"]["password"], json!("hunter2"));
-    assert_eq!(got["entry"]["username"], json!("sana@example.com"));
-    assert_eq!(got["entry"]["url"], json!("https://example.com/login"));
+    assert_eq!(got["entry"]["secret"], json!("hunter2"));
+    assert_eq!(field(&got["entry"], "username"), Some("sana@example.com"));
+    assert_eq!(
+        field(&got["entry"], "url"),
+        Some("https://example.com/login")
+    );
 
     // And it is a real entry, not just a readable file.
     let names = reply(&mut host, json!({ "id": 22, "verb": "list" }));
@@ -319,7 +342,7 @@ fn insert_refuses_a_name_that_is_already_taken_rather_than_overwriting_it() {
             "id": 23,
             "verb": "insert",
             "entry": "web/github.com",
-            "password": "owned",
+            "secret": "owned",
         }),
     );
     assert_eq!(response["ok"], json!(false));
@@ -330,7 +353,7 @@ fn insert_refuses_a_name_that_is_already_taken_rather_than_overwriting_it() {
         json!({ "id": 24, "verb": "get", "entry": "web/github.com" }),
     );
     assert_eq!(
-        got["entry"]["password"],
+        got["entry"]["secret"],
         json!("octocat-pw"),
         "the original password must survive a refused insert"
     );
@@ -345,7 +368,7 @@ fn insert_is_refused_while_the_store_is_locked() {
             "id": 25,
             "verb": "insert",
             "entry": "web/example.com",
-            "password": "hunter2",
+            "secret": "hunter2",
         }),
     );
     assert_eq!(response["ok"], json!(false));
@@ -373,7 +396,7 @@ fn a_line_break_in_a_field_cannot_forge_a_second_one() {
             "id": 27,
             "verb": "insert",
             "entry": "web/example.com",
-            "password": "hunter2\nurl: https://phish.example",
+            "secret": "hunter2\nurl: https://phish.example",
         }),
     );
     assert_eq!(response["ok"], json!(false));
@@ -404,4 +427,248 @@ fn a_request_with_no_usable_id_still_gets_an_answer() {
 
     assert_eq!(response["ok"], json!(false));
     assert_eq!(response["id"], json!(0));
+}
+
+#[test]
+fn insert_writes_a_card_in_the_shape_the_cli_would_have_written() {
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 30,
+            "verb": "insert",
+            "entry": "cards/visa",
+            "kind": "card",
+            "secret": "4111111111111111",
+            "fields": [
+                { "key": "cardholder", "value": "Sana Qureshi" },
+                { "key": "exp-month", "value": "04" },
+                { "key": "exp-year", "value": "2029" },
+            ],
+        }),
+    );
+    assert_eq!(response["ok"], json!(true));
+
+    let got = reply(
+        &mut host,
+        json!({ "id": 31, "verb": "get", "entry": "cards/visa" }),
+    );
+    assert_eq!(got["entry"]["kind"], json!("card"));
+    assert_eq!(got["entry"]["secret"], json!("4111111111111111"));
+    assert_eq!(field(&got["entry"], "cardholder"), Some("Sana Qureshi"));
+    assert_eq!(field(&got["entry"], "exp-month"), Some("04"));
+}
+
+#[test]
+fn insert_writes_an_identity_that_has_no_secret_at_all() {
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 32,
+            "verb": "insert",
+            "entry": "me/home",
+            "kind": "identity",
+            "fields": [
+                { "key": "given-name", "value": "Sana" },
+                { "key": "country", "value": "Bangladesh" },
+            ],
+        }),
+    );
+    assert_eq!(response["ok"], json!(true));
+
+    let got = reply(
+        &mut host,
+        json!({ "id": 33, "verb": "get", "entry": "me/home" }),
+    );
+    assert_eq!(got["entry"]["kind"], json!("identity"));
+    assert_eq!(got["entry"]["secret"], json!(""));
+    assert_eq!(field(&got["entry"], "given-name"), Some("Sana"));
+}
+
+#[test]
+fn update_rewrites_one_field_and_leaves_the_rest_alone() {
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 34,
+            "verb": "update",
+            "entry": "web/google.com",
+            "fields": [{ "key": "username", "value": "someone@else" }],
+        }),
+    );
+    assert_eq!(response["ok"], json!(true));
+    assert_eq!(response["entry"], json!("web/google.com"));
+
+    let got = reply(
+        &mut host,
+        json!({ "id": 35, "verb": "get", "entry": "web/google.com" }),
+    );
+    assert_eq!(field(&got["entry"], "username"), Some("someone@else"));
+    assert_eq!(got["entry"]["secret"], json!("hunter2"));
+    assert_eq!(field(&got["entry"], "url"), Some("https://google.com"));
+    assert_eq!(
+        field(&got["entry"], "totp"),
+        Some("otpauth://totp/g?secret=JBSWY3DPEHPK3PXP"),
+        "an update must not drop what it did not name"
+    );
+}
+
+#[test]
+fn update_keeps_a_line_this_host_does_not_understand() {
+    let (dir, store) = store_with(&[(
+        "web/example.com",
+        "hunter2\nusername: sana\nfavourite-colour: green\n",
+    )]);
+    let mut host = Host::with_session(store, Session::new(dir.path().join("identity.txt")));
+
+    reply(
+        &mut host,
+        json!({
+            "id": 36,
+            "verb": "update",
+            "entry": "web/example.com",
+            "secret": "new-password",
+        }),
+    );
+
+    let body = body_of(dir.path(), "web/example.com");
+    assert!(
+        body.contains("favourite-colour: green"),
+        "an unknown line was dropped: {body}"
+    );
+    assert!(body.starts_with("new-password\n"), "{body}");
+}
+
+#[test]
+fn update_writes_a_field_under_the_spelling_the_entry_already_used() {
+    let (dir, store) = store_with(&[("web/example.com", "hunter2\nemail: old@example.com\n")]);
+    let mut host = Host::with_session(store, Session::new(dir.path().join("identity.txt")));
+
+    reply(
+        &mut host,
+        json!({
+            "id": 37,
+            "verb": "update",
+            "entry": "web/example.com",
+            "fields": [{ "key": "username", "value": "new@example.com" }],
+        }),
+    );
+
+    let body = body_of(dir.path(), "web/example.com");
+    assert!(body.contains("email: new@example.com"), "{body}");
+    assert!(
+        !body.contains("username:"),
+        "a second spelling appeared: {body}"
+    );
+}
+
+#[test]
+fn update_clears_a_field_written_empty() {
+    let (_dir, mut host) = sample();
+    reply(
+        &mut host,
+        json!({
+            "id": 38,
+            "verb": "update",
+            "entry": "web/github.com",
+            "fields": [{ "key": "username", "value": "" }],
+        }),
+    );
+
+    let got = reply(
+        &mut host,
+        json!({ "id": 39, "verb": "get", "entry": "web/github.com" }),
+    );
+    assert_eq!(field(&got["entry"], "username"), None);
+}
+
+#[test]
+fn update_refuses_an_entry_that_is_not_there_rather_than_creating_it() {
+    let (_dir, mut host) = sample();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 40,
+            "verb": "update",
+            "entry": "web/nowhere",
+            "secret": "hunter2",
+        }),
+    );
+
+    assert_eq!(response["ok"], json!(false));
+    assert_eq!(error_code(&response), "not_found");
+
+    let names = reply(&mut host, json!({ "id": 41, "verb": "list" }));
+    assert!(
+        !names["entries"]
+            .as_array()
+            .expect("a list")
+            .contains(&json!("web/nowhere")),
+        "update created an entry: {names}"
+    );
+}
+
+#[test]
+fn update_is_refused_while_the_store_is_locked() {
+    let (_dir, mut host) = sample_locked();
+    let response = reply(
+        &mut host,
+        json!({
+            "id": 42,
+            "verb": "update",
+            "entry": "web/github.com",
+            "secret": "owned",
+        }),
+    );
+
+    assert_eq!(response["ok"], json!(false));
+    assert_eq!(error_code(&response), "locked");
+}
+
+#[test]
+fn items_lists_a_kind_with_a_hint_that_is_never_a_secret() {
+    let (_dir, mut host) = sample();
+    reply(
+        &mut host,
+        json!({
+            "id": 43,
+            "verb": "insert",
+            "entry": "cards/visa",
+            "kind": "card",
+            "secret": "4111111111111111",
+            "fields": [{ "key": "brand", "value": "Visa" }],
+        }),
+    );
+
+    let response = reply(
+        &mut host,
+        json!({ "id": 44, "verb": "items", "kinds": ["card"] }),
+    );
+    let items = response["items"].as_array().expect("a list of items");
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0]["name"], json!("cards/visa"));
+    assert_eq!(items[0]["kind"], json!("card"));
+
+    let hint = items[0]["hint"].as_str().expect("a hint");
+    assert!(hint.contains("1111"), "the last four are the point: {hint}");
+    assert!(
+        !response.to_string().contains("4111111111111111"),
+        "items leaked a card number"
+    );
+}
+
+#[test]
+fn items_with_no_kinds_covers_the_whole_store() {
+    let (_dir, mut host) = sample();
+    let response = reply(&mut host, json!({ "id": 45, "verb": "items" }));
+
+    let items = response["items"].as_array().expect("a list of items");
+    assert_eq!(items.len(), 4, "{items:?}");
+    assert!(items.iter().all(|item| item["kind"] == json!("login")));
+    assert!(
+        !response.to_string().contains("hunter2"),
+        "items leaked a password"
+    );
 }
