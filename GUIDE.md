@@ -14,6 +14,7 @@ the browser.
 - [Using the popup](#using-the-popup)
 - [The inline dropdown](#the-inline-dropdown)
 - [The save prompt](#the-save-prompt)
+- [Cards and identities](#cards-and-identities)
 - [What the popup asks the host for](#what-the-popup-asks-the-host-for)
 - [The workbench](#the-workbench)
 - [Design system](#design-system)
@@ -166,6 +167,46 @@ name ([ADR-0007](docs/adr/0007-saving-a-login-from-the-page.md)).
 
 A name that is already taken is refused, with the reason shown in the prompt
 and your typed name still there.
+
+## Cards and identities
+
+The **+** in the header opens **New item**, which is three tabs: a login, a
+card, or an identity. A card's first line is its number; an identity has no
+secret at all, only fields.
+
+```
+Login      Card       Identity
+Name       cards/visa
+Card number  4111 1111 1111 4242
+Cardholder   Sana Qureshi
+Expiry month 04     Expiry year 2029
+Security code, Brand, Postcode
+```
+
+Focus a card field on a checkout — anything that says `autocomplete="cc-number"`,
+or is plainly named `cardNumber`, `cvv`, `postcode` — and nopass offers the
+cards you have stored, each row reading as its brand and last four digits.
+Picking one fills the number, the name, the expiry and the security code into
+whichever fields asked for them. An address field offers your identities the
+same way.
+
+**Nothing is filled without that pick.** A card belongs to no site, so there
+is no origin rule to lean on; your choosing it is the whole gate. A row never
+carries more of the number than a receipt would print.
+
+> **Storing a security code is optional and off unless you type one.** Many
+> card issuers forbid keeping it, and a stored code turns a stolen store into
+> a usable card.
+
+### Changing what is stored
+
+Open an entry and press **Edit**. The fields become inputs, and saving asks
+once more, naming the entry before it replaces anything. Only the fields on
+screen are sent: a line nopass does not recognise — a note you added by hand,
+a field a newer version wrote — is left exactly where it was
+([ADR-0009](docs/adr/0009-updating-an-entry-from-the-extension.md)).
+
+Removing an entry is still a terminal job: `nopass rm`.
 
 ## What the popup asks the host for
 
