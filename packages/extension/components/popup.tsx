@@ -1,7 +1,10 @@
 import {
+  type Item,
+  type Kind,
   MAX_PASSWORD_LENGTH,
   type Match,
   MIN_PASSWORD_LENGTH,
+  type Field as RecordField,
   type Secret,
 } from "@nopass/protocol";
 import { Button } from "@nopass/ui/components/button";
@@ -13,21 +16,25 @@ import {
   Check,
   ChevronRight,
   Copy,
+  CreditCard,
   Database,
   Dices,
   Eye,
   EyeOff,
   Lock,
   LockOpen,
+  Pencil,
   Plus,
   Search,
   Shield,
   Unplug,
+  User,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Bridge } from "../lib/bridge";
 import { BridgeError } from "../lib/bridge";
 import { displayName, folderOf } from "../lib/dropdown";
+import { fieldsFor, labelFor, read, toFields, withField } from "../lib/record";
 import type { SessionState } from "../lib/session";
 import { initialSession } from "../lib/session";
 
@@ -44,10 +51,31 @@ const DEFAULT_PASSWORD_LENGTH = 20;
  * go that is more than one step from the list, and a back button that
  * sometimes means two different things is worse than no history at all.
  */
-type View =
-  | { kind: "list" }
-  | { kind: "detail"; entry: Match }
-  | { kind: "new" };
+type View = { kind: "list" } | { kind: "detail"; entry: Row } | { kind: "new" };
+
+/**
+ * A row in either list.
+ *
+ * "This page" comes from `search` and carries a username; "All items" comes
+ * from `items` and carries a hint the host built. Both are a name and a kind,
+ * and the cursor moves across the two as one list, so they are one type.
+ */
+interface Row {
+  hint?: string | undefined;
+  kind: Kind;
+  name: string;
+}
+
+/** Fields worth masking on screen, the way a password is. */
+const SECRET_FIELDS = new Set(["cvv", "totp"]);
+
+/** What the first line of each kind is called, where the user can see it. */
+const SECRET_LABEL: Record<Kind, string> = {
+  card: "Card number",
+  identity: "Entry",
+  login: "Password",
+  passkey: "Passkey",
+};
 
 /**
  * The popup.
@@ -63,7 +91,7 @@ export function Popup({ bridge }: { bridge: Bridge }) {
   const [session, setSession] = useState<SessionState>(initialSession);
   const [origin, setOrigin] = useState<string | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
-  const [others, setOthers] = useState<Match[]>([]);
+  const [others, setOthers] = useState<Item[]>([]);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -108,15 +136,13 @@ export function Popup({ bridge }: { bridge: Bridge }) {
       return;
     }
 
-    const [found, names] = await Promise.all([
+    const [found, everything] = await Promise.all([
       where ? bridge.search(where) : Promise.resolve<Match[]>([]),
-      bridge.list(),
+      bridge.items(),
     ]);
     const taken = new Set(found.map((entry) => entry.name));
     setMatches(found);
-    setOthers(
-      names.filter((name) => !taken.has(name)).map((name) => ({ name }))
-    );
+    setOthers(everything.filter((item) => !taken.has(item.name)));
   }, [bridge]);
 
   useEffect(() => {
@@ -153,10 +179,22 @@ export function Popup({ bridge }: { bridge: Bridge }) {
 
   const { visibleMatches, visibleOthers } = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const keep = (entry: Match) =>
-      !needle || entry.name.toLowerCase().includes(needle);
+    const keep = (row: Row) =>
+      !needle ||
+      row.name.toLowerCase().includes(needle) ||
+      (row.hint ?? "").toLowerCase().includes(needle);
+
+    // A match already reads as its username; an item reads as the hint the
+    // host built, which for a card is its brand and last four digits.
+    const asRows = (found: Match[]): Row[] =>
+      found.map((match) => ({
+        hint: match.username,
+        kind: match.kind,
+        name: match.name,
+      }));
+
     return {
-      visibleMatches: matches.filter(keep),
+      visibleMatches: asRows(matches).filter(keep),
       visibleOthers: others.filter(keep),
     };
   }, [matches, others, query]);
@@ -169,7 +207,7 @@ export function Popup({ bridge }: { bridge: Bridge }) {
   );
 
   const onFill = useCallback(
-    async (entry: Match) => {
+    async (entry: Row) => {
       // The real bridge closes the window on the way out, so this note is for
       // the workbench and for a browser that declines to close.
       flash(`Filled into ${hostOf(origin) ?? "the page"}`);
@@ -179,10 +217,10 @@ export function Popup({ bridge }: { bridge: Bridge }) {
   );
 
   const onCopy = useCallback(
-    async (entry: Match) => {
-      const secret = await bridge.reveal(entry.name);
-      await navigator.clipboard.writeText(secret.password);
-      flash(`Password for ${displayName(entry.name)} copied.`);
+    async (row: Row) => {
+      const entry = await bridge.reveal(row.name);
+      await navigator.clipboard.writeText(entry.secret);
+      flash(`${SECRET_LABEL[entry.kind]} for ${displayName(row.name)} copied.`);
     },
     [bridge, flash]
   );
@@ -311,6 +349,7 @@ export function Popup({ bridge }: { bridge: Bridge }) {
           bridge={bridge}
           entry={view.entry}
           onBack={() => setView({ kind: "list" })}
+          onChanged={load}
           onFill={onFill}
           onFlash={flash}
         />
@@ -882,12 +921,16 @@ function DetailField({
 }
 
 /**
- * One entry, in full.
+ * One entry, in full, and the only screen that can change one.
  *
- * Opening this screen is a `get`, because a row from "All items" carries
- * nothing but a name — `list` never returns a field. The password arrives with
- * it but stays masked until asked for: what the popup holds and what is on
- * screen over someone's shoulder are two different things.
+ * Opening it is a `get`, because a row carries a name and a hint and nothing
+ * else. The secret arrives with it but stays masked until asked for: what the
+ * popup holds and what is on screen over someone's shoulder are two different
+ * things.
+ *
+ * Editing is a two-step: the fields become inputs, and saving asks once, by
+ * name, before anything is replaced. The host cannot check that a human
+ * agreed, so the confirmation is a rule this screen keeps (ADR-0009).
  */
 function Detail({
   bridge,
@@ -895,15 +938,18 @@ function Detail({
   onBack,
   onFill,
   onFlash,
+  onChanged,
 }: {
   bridge: Bridge;
-  entry: Match;
+  entry: Row;
   onBack: () => void;
-  onFill: (entry: Match) => Promise<void>;
+  onFill: (entry: Row) => Promise<void>;
   onFlash: (note: string) => void;
+  onChanged: () => Promise<void>;
 }) {
   const [secret, setSecret] = useState<Secret | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -929,6 +975,8 @@ function Detail({
     onFlash(`${label} copied.`);
   };
 
+  const shown = secret;
+
   return (
     <>
       <SubHeader
@@ -944,42 +992,46 @@ function Detail({
           </p>
         )}
 
-        {secret === null && failed === null && (
+        {shown === null && failed === null && (
           <div className="flex flex-1 items-center justify-center">
             <Spinner className="size-4 text-muted-foreground" />
           </div>
         )}
 
-        {secret === null ? null : (
+        {shown !== null && editing ? (
+          <EditEntry
+            bridge={bridge}
+            entry={shown}
+            onCancel={() => setEditing(false)}
+            onSaved={async (updated) => {
+              setSecret(updated);
+              setEditing(false);
+              onFlash(`${displayName(updated.name)} updated.`);
+              await onChanged();
+            }}
+          />
+        ) : null}
+
+        {shown !== null && !editing ? (
           <>
-            {secret.username ? (
+            {shown.kind === "identity" ? null : (
               <DetailField
-                label="Username"
-                onCopy={() => copy("Username", secret.username ?? "")}
-                value={secret.username}
-              />
-            ) : null}
-            <DetailField
-              label="Password"
-              onCopy={() => copy("Password", secret.password)}
-              secret
-              value={secret.password}
-            />
-            {secret.url ? (
-              <DetailField
-                label="URL"
-                onCopy={() => copy("URL", secret.url ?? "")}
-                value={secret.url}
-              />
-            ) : null}
-            {secret.totp ? (
-              <DetailField
-                label="TOTP"
-                onCopy={() => copy("TOTP", secret.totp ?? "")}
+                label={SECRET_LABEL[shown.kind]}
+                onCopy={() => copy(SECRET_LABEL[shown.kind], shown.secret)}
                 secret
-                value={secret.totp}
+                value={shown.secret}
               />
-            ) : null}
+            )}
+
+            {shown.fields.map((field) => (
+              <DetailField
+                key={field.key}
+                label={labelFor(field.key)}
+                onCopy={() => copy(labelFor(field.key), field.value)}
+                secret={SECRET_FIELDS.has(field.key)}
+                value={field.value}
+              />
+            ))}
 
             <Button
               className="mt-1 w-full font-semibold"
@@ -988,19 +1040,143 @@ function Detail({
             >
               Fill this page
             </Button>
+
+            <Button
+              className="w-full font-semibold"
+              onClick={() => setEditing(true)}
+              type="button"
+              variant="outline"
+            >
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
           </>
-        )}
+        ) : null}
       </div>
     </>
   );
 }
 
 /**
- * A new login.
+ * The same entry, as inputs.
  *
- * The one screen that changes the store. It can only ever create: a name
- * already taken comes back from the host as `exists` and is shown against the
- * name field, rather than replacing what is there (ADR-0006).
+ * Only what changed is sent: the host rewrites the fields it is given and
+ * leaves every other line of the entry alone, so a field written by a newer
+ * nopass — or by hand — survives an edit made here.
+ */
+function EditEntry({
+  bridge,
+  entry,
+  onCancel,
+  onSaved,
+}: {
+  bridge: Bridge;
+  entry: Secret;
+  onCancel: () => void;
+  onSaved: (updated: Secret) => Promise<void>;
+}) {
+  const [secret, setSecret] = useState(entry.secret);
+  const [fields, setFields] = useState<RecordField[]>(() =>
+    fieldsFor(entry.kind).map((key) => ({
+      key,
+      value: read(entry, key) ?? "",
+    }))
+  );
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const onSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+
+    setBusy(true);
+    setRefused(null);
+    try {
+      // Every field of this kind travels, including the ones left blank: an
+      // empty value is how the host is told to clear a field.
+      await bridge.update({ entry: entry.name, fields, secret });
+      await onSaved({
+        ...entry,
+        fields: fields.filter((f) => f.value),
+        secret,
+      });
+    } catch (error) {
+      setRefused(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <form className="flex flex-col gap-3" onSubmit={onSubmit}>
+      {entry.kind === "identity" ? null : (
+        <Field
+          id="np-edit-secret"
+          label={SECRET_LABEL[entry.kind]}
+          onChange={setSecret}
+          placeholder=""
+          value={secret}
+        />
+      )}
+
+      {fields.map((field) => (
+        <Field
+          id={`np-edit-${field.key}`}
+          key={field.key}
+          label={labelFor(field.key)}
+          onChange={(next) =>
+            setFields((current) => withField(current, field.key, next))
+          }
+          placeholder=""
+          value={field.value}
+        />
+      ))}
+
+      {refused !== null && (
+        <p className="text-[12px] text-warning leading-normal" role="alert">
+          {refused}
+        </p>
+      )}
+
+      {confirming ? (
+        <p className="text-[12px] text-warning leading-normal" role="alert">
+          This replaces what is stored under{" "}
+          <span className="font-mono text-[11px]">{entry.name}</span>. Press
+          Replace again to go ahead.
+        </p>
+      ) : null}
+
+      <div className="flex gap-2">
+        <Button
+          className="flex-1"
+          onClick={() => {
+            setConfirming(false);
+            onCancel();
+          }}
+          type="button"
+          variant="outline"
+        >
+          Cancel
+        </Button>
+        <Button className="flex-1 font-semibold" disabled={busy} type="submit">
+          {busy ? <Spinner className="size-4" /> : saveLabel(confirming)}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * A new entry: a login, a card, or an identity.
+ *
+ * Creating can only ever create: a name already taken comes back from the
+ * host as `exists` and is shown against the name field, rather than replacing
+ * what is there (ADR-0006). Changing one is the entry screen's job.
  */
 function NewLogin({
   bridge,
@@ -1015,10 +1191,12 @@ function NewLogin({
   onSaved: (entry: string) => Promise<void>;
   origin: string | null;
 }) {
+  const [kind, setKind] = useState<Kind>("login");
   const [name, setName] = useState(host ? `web/${host}` : "");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [url, setUrl] = useState(origin ?? "");
+  const [secret, setSecret] = useState("");
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    origin ? { url: origin } : {}
+  );
   const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
@@ -1036,11 +1214,20 @@ function NewLogin({
   const onGenerate = async () => {
     setRefused(null);
     try {
-      setPassword(await bridge.generate(length, symbols));
+      setSecret(await bridge.generate(length, symbols));
       setShown(true);
     } catch (error) {
       setRefused(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const pickKind = (next: Kind) => {
+    setKind(next);
+    setRefused(null);
+    // The name a card or an identity wants has nothing to do with the tab.
+    setName((current) =>
+      current === defaultName(kind, host) ? defaultName(next, host) : current
+    );
   };
 
   const onSubmit = async (event: React.FormEvent) => {
@@ -1049,13 +1236,13 @@ function NewLogin({
     setRefused(null);
     setTaken(false);
     try {
-      // Omitted rather than sent empty: the host writes no line for a field
-      // it was not given, so a blank one leaves no `url:` in the file at all.
+      // A field left blank is left out rather than sent empty: the host
+      // writes no line for a field it was not given.
       const saved = await bridge.save({
         entry: name.trim(),
-        password,
-        ...(url.trim() ? { url: url.trim() } : {}),
-        ...(username.trim() ? { username: username.trim() } : {}),
+        fields: toFields(values),
+        kind,
+        ...(kind === "identity" ? {} : { secret }),
       });
       await onSaved(saved);
     } catch (error) {
@@ -1066,80 +1253,97 @@ function NewLogin({
     }
   };
 
+  const ready =
+    name.trim().length > 0 && (kind === "identity" || secret.length > 0);
+
   return (
     <>
-      <SubHeader onBack={onBack} title="New login" />
+      <SubHeader onBack={onBack} title="New item" />
 
       <form
         className="flex flex-1 flex-col gap-3 overflow-y-auto px-3.5 py-3.5"
         onSubmit={onSubmit}
       >
+        <KindPicker onPick={pickKind} picked={kind} />
+
         <Field
-          hint="Where it lands in the store. A name ending in the site's host is what makes it match."
+          hint={
+            kind === "login"
+              ? "Where it lands in the store. A name ending in the site's host is what makes it match."
+              : "Where it lands in the store."
+          }
           id="np-name"
           invalid={taken}
           label="Name"
           onChange={setName}
-          placeholder="web/example.com"
+          placeholder={defaultName(kind, host) || "web/example.com"}
           value={name}
         />
-        <Field
-          id="np-username"
-          label="Email or username"
-          onChange={setUsername}
-          placeholder="you@example.com"
-          value={username}
-        />
 
-        <div className="flex flex-col gap-1.5">
-          <label
-            className="font-medium text-[12px] text-muted-foreground"
-            htmlFor="np-new-password"
-          >
-            Password
-          </label>
-          <div className="relative">
-            <Input
-              className="pr-9"
-              data-secret
-              id="np-new-password"
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="••••••••••••"
-              type={shown ? "text" : "password"}
-              value={password}
-            />
-            <Button
-              aria-label={shown ? "Hide the password" : "Show the password"}
-              className="absolute top-1/2 right-1 size-7 -translate-y-1/2"
-              onClick={() => setShown((was) => !was)}
-              size="icon"
-              type="button"
-              variant="ghost"
+        {kind === "identity" ? null : (
+          <div className="flex flex-col gap-1.5">
+            <label
+              className="font-medium text-[12px] text-muted-foreground"
+              htmlFor="np-new-secret"
             >
-              {shown ? (
-                <EyeOff className="size-3.5" />
-              ) : (
-                <Eye className="size-3.5" />
-              )}
-            </Button>
+              {SECRET_LABEL[kind]}
+            </label>
+            <div className="relative">
+              <Input
+                className="pr-9"
+                data-secret
+                id="np-new-secret"
+                onChange={(event) => setSecret(event.target.value)}
+                placeholder={
+                  kind === "card" ? "4111 1111 1111 1111" : "••••••••••••"
+                }
+                type={shown ? "text" : "password"}
+                value={secret}
+              />
+              <Button
+                aria-label={
+                  shown
+                    ? `Hide the ${SECRET_LABEL[kind].toLowerCase()}`
+                    : `Show the ${SECRET_LABEL[kind].toLowerCase()}`
+                }
+                className="absolute top-1/2 right-1 size-7 -translate-y-1/2"
+                onClick={() => setShown((was) => !was)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                {shown ? (
+                  <EyeOff className="size-3.5" />
+                ) : (
+                  <Eye className="size-3.5" />
+                )}
+              </Button>
+            </div>
+
+            {kind === "login" && (
+              <GeneratorRow
+                length={length}
+                onGenerate={() => void onGenerate()}
+                onLength={setLength}
+                onSymbols={setSymbols}
+                symbols={symbols}
+              />
+            )}
           </div>
+        )}
 
-          <GeneratorRow
-            length={length}
-            onGenerate={() => void onGenerate()}
-            onLength={setLength}
-            onSymbols={setSymbols}
-            symbols={symbols}
+        {fieldsFor(kind).map((key) => (
+          <Field
+            id={`np-new-${key}`}
+            key={key}
+            label={labelFor(key)}
+            onChange={(next) =>
+              setValues((current) => ({ ...current, [key]: next }))
+            }
+            placeholder=""
+            value={values[key] ?? ""}
           />
-        </div>
-
-        <Field
-          id="np-url"
-          label="Website"
-          onChange={setUrl}
-          placeholder="https://example.com"
-          value={url}
-        />
+        ))}
 
         {refused !== null && (
           <p className="text-[12px] text-warning leading-normal" role="alert">
@@ -1149,18 +1353,74 @@ function NewLogin({
 
         <Button
           className="mt-1 w-full font-semibold"
-          disabled={busy || !name.trim() || !password}
+          disabled={busy || !ready}
           type="submit"
         >
           {busy ? <Spinner className="size-4" /> : "Save to store"}
         </Button>
 
         <p className="text-[11px] text-muted-foreground leading-normal">
-          Encrypted to your store's public key. Changing or removing an entry
-          still happens in a terminal.
+          Encrypted to your store's public key. Removing an entry still happens
+          in a terminal.
         </p>
       </form>
     </>
+  );
+}
+
+/** What the save button says, which is the whole confirmation step. */
+function saveLabel(confirming: boolean): string {
+  return confirming ? "Replace" : "Save changes";
+}
+
+/** The name a fresh entry of each kind starts with. */
+function defaultName(kind: Kind, host: string | null): string {
+  switch (kind) {
+    case "card":
+      return "cards/";
+    case "identity":
+      return "me/";
+    default:
+      return host ? `web/${host}` : "";
+  }
+}
+
+/** Three kinds, three words. A segmented control rather than a select: at
+ *  three options the list is shorter than the menu that would hide it. */
+function KindPicker({
+  picked,
+  onPick,
+}: {
+  picked: Kind;
+  onPick: (kind: Kind) => void;
+}) {
+  const options: { kind: Kind; label: string; icon: typeof Lock }[] = [
+    { icon: Lock, kind: "login", label: "Login" },
+    { icon: CreditCard, kind: "card", label: "Card" },
+    { icon: User, kind: "identity", label: "Identity" },
+  ];
+
+  return (
+    <div className="flex gap-1 rounded-md bg-muted p-1" role="tablist">
+      {options.map((option) => (
+        <button
+          aria-selected={picked === option.kind}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 rounded-sm py-1.5 font-medium text-[12px]",
+            picked === option.kind
+              ? "bg-card text-foreground shadow-[inset_0_0_0_1px_var(--border)]"
+              : "text-muted-foreground"
+          )}
+          key={option.kind}
+          onClick={() => onPick(option.kind)}
+          role="tab"
+          type="button"
+        >
+          <option.icon className="size-3.5" />
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
