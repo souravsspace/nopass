@@ -8,29 +8,104 @@
 
 import { type Bridge, BridgeError } from "@nopass/extension/lib/bridge";
 import type { SessionState } from "@nopass/extension/lib/session";
-import type { Match, Secret } from "@nopass/protocol";
+import type { Field, Item, Kind, Match, Secret } from "@nopass/protocol";
+
+/** `key: value` lines, minus the ones nobody filled in. */
+function fields(pairs: [string, string | undefined][]): Field[] {
+  return pairs
+    .filter((pair): pair is [string, string] => Boolean(pair[1]))
+    .map(([key, value]) => ({ key, value }));
+}
 
 export const ENTRIES: Secret[] = [
   {
+    fields: fields([
+      ["username", "sana@example.com"],
+      ["url", "https://github.com"],
+      ["totp", "otpauth://totp/github?secret=JBSWY3DPEHPK3PXP"],
+    ]),
+    kind: "login",
     name: "web/github.com",
-    password: "9x!Kd2pQvr4TmZ",
-    totp: "otpauth://totp/github?secret=JBSWY3DPEHPK3PXP",
-    url: "https://github.com",
-    username: "sana@example.com",
+    secret: "9x!Kd2pQvr4TmZ",
   },
   {
+    fields: fields([
+      ["username", "sana@work.example"],
+      ["url", "https://github.com"],
+    ]),
+    kind: "login",
     name: "web/github.com-work",
-    password: "Lp7#eR1wYq0NbA",
-    url: "https://github.com",
-    username: "sana@work.example",
+    secret: "Lp7#eR1wYq0NbA",
   },
-  { name: "web/mail.github.com", password: "Tz3$hV8mCk5JdE" },
   {
+    fields: [],
+    kind: "login",
+    name: "web/mail.github.com",
+    secret: "Tz3$hV8mCk5JdE",
+  },
+  {
+    fields: fields([["username", "sana"]]),
+    kind: "login",
     name: "personal/news.ycombinator.com",
-    password: "Qw2@nX6bFs9RgU",
-    username: "sana",
+    secret: "Qw2@nX6bFs9RgU",
+  },
+  {
+    fields: fields([
+      ["cardholder", "Sana Qureshi"],
+      ["exp-month", "04"],
+      ["exp-year", "2029"],
+      ["brand", "Visa"],
+    ]),
+    kind: "card",
+    name: "cards/visa",
+    secret: "4111111111114242",
+  },
+  {
+    fields: fields([
+      ["given-name", "Sana"],
+      ["family-name", "Qureshi"],
+      ["email", "sana@example.com"],
+      ["street", "12 Example Road"],
+      ["city", "Dhaka"],
+      ["country", "Bangladesh"],
+    ]),
+    kind: "identity",
+    name: "me/home",
+    secret: "",
   },
 ];
+
+/** The row an entry shows in a list: a name, a kind, and never a secret. */
+function itemFor(entry: Secret): Item {
+  const value = (key: string) =>
+    entry.fields.find((field) => field.key === key)?.value;
+
+  switch (entry.kind) {
+    case "card": {
+      const tail = entry.secret.slice(-4);
+      const brand = value("brand");
+      return {
+        hint: brand ? `${brand} •••• ${tail}` : `•••• ${tail}`,
+        kind: entry.kind,
+        name: entry.name,
+      };
+    }
+    case "identity": {
+      const name = [value("given-name"), value("family-name")]
+        .filter(Boolean)
+        .join(" ");
+      return { hint: name, kind: entry.kind, name: entry.name };
+    }
+    default: {
+      const username = value("username");
+      return {
+        kind: entry.kind,
+        name: entry.name,
+        ...(username ? { hint: username } : {}),
+      };
+    }
+  }
+}
 
 /**
  * The one passphrase this fake store opens for. A refusal is reachable here
@@ -117,6 +192,13 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
       ).join("");
       return Promise.resolve(made);
     },
+    items(kinds?: Kind[]) {
+      log(`items(${kinds?.join(", ") ?? "all"})`);
+      const wanted = ENTRIES.filter(
+        (entry) => !kinds || kinds.includes(entry.kind)
+      );
+      return Promise.resolve(wanted.map(itemFor));
+    },
     list() {
       log("list()");
       return Promise.resolve(ENTRIES.map((entry) => entry.name));
@@ -133,8 +215,9 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
         ? Promise.resolve(found)
         : Promise.reject(new Error(`${entry} is not in the store`));
     },
+
     save(draft) {
-      log(`save(${draft.entry})`);
+      log(`save(${draft.entry}, ${draft.kind ?? "login"})`);
       // The refusal that matters is the one the real host makes: a name
       // already taken is never overwritten (ADR-0006).
       if (ENTRIES.some((entry) => entry.name === draft.entry)) {
@@ -143,10 +226,10 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
         );
       }
       ENTRIES.push({
+        fields: draft.fields ?? [],
+        kind: draft.kind ?? "login",
         name: draft.entry,
-        password: draft.password,
-        ...(draft.url ? { url: draft.url } : {}),
-        ...(draft.username ? { username: draft.username } : {}),
+        secret: draft.secret ?? "",
       });
       return Promise.resolve(draft.entry);
     },
@@ -156,8 +239,15 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
         return Promise.resolve([]);
       }
       const matches: Match[] = ENTRIES.filter((entry) =>
-        entry.url?.includes("github")
-      ).map(({ name, username, url }) => ({ name, url, username }));
+        entry.fields.some(
+          (field) => field.key === "url" && field.value.includes("github")
+        )
+      ).map((entry) => ({
+        kind: entry.kind,
+        name: entry.name,
+        url: entry.fields.find((field) => field.key === "url")?.value,
+        username: entry.fields.find((field) => field.key === "username")?.value,
+      }));
       return Promise.resolve(matches);
     },
     session() {
@@ -175,6 +265,33 @@ export function mockBridge(scenario: Scenario, log: Log): Bridge {
       }
       state = { expiresIn: 300, status: "unlocked" };
       return Promise.resolve(state);
+    },
+
+    update(patch) {
+      log(`update(${patch.entry})`);
+      const found = ENTRIES.find((entry) => entry.name === patch.entry);
+      if (!found) {
+        return Promise.reject(
+          new BridgeError("not_found", `${patch.entry} is not in the store`)
+        );
+      }
+      if (patch.secret !== undefined) {
+        found.secret = patch.secret;
+      }
+      for (const field of patch.fields ?? []) {
+        const at = found.fields.findIndex((have) => have.key === field.key);
+        // An empty value is how the host is told to clear a field.
+        if (!field.value) {
+          if (at !== -1) {
+            found.fields.splice(at, 1);
+          }
+        } else if (at === -1) {
+          found.fields.push(field);
+        } else {
+          found.fields[at] = field;
+        }
+      }
+      return Promise.resolve(patch.entry);
     },
   };
 }
