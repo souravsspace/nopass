@@ -636,16 +636,16 @@ function EntryList({
   onHover,
   onOpen,
 }: {
-  matches: Match[];
-  others: Match[];
+  matches: Row[];
+  others: Row[];
   host: string | null;
   cursor: number;
-  onFill: (entry: Match) => Promise<void>;
-  onCopy: (entry: Match) => Promise<void>;
+  onFill: (entry: Row) => Promise<void>;
+  onCopy: (entry: Row) => Promise<void>;
   onHover: (index: number) => void;
-  onOpen: (entry: Match) => void;
+  onOpen: (entry: Row) => void;
 }) {
-  const row = (entry: Match, index: number) => (
+  const row = (entry: Row, index: number) => (
     <EntryRow
       cursor={cursor}
       entry={entry}
@@ -744,13 +744,13 @@ function EntryRow({
   onHover,
   onOpen,
 }: {
-  entry: Match;
+  entry: Row;
   index: number;
   cursor: number;
-  onFill: (entry: Match) => Promise<void>;
-  onCopy: (entry: Match) => Promise<void>;
+  onFill: (entry: Row) => Promise<void>;
+  onCopy: (entry: Row) => Promise<void>;
   onHover: (index: number) => void;
-  onOpen: (entry: Match) => void;
+  onOpen: (entry: Row) => void;
 }) {
   const selected = cursor === index;
   const folder = folderOf(entry.name);
@@ -781,15 +781,15 @@ function EntryRow({
         type="button"
       >
         <span className="block truncate font-semibold text-[13px]">
-          {entry.username ?? displayName(entry.name)}
+          {entry.hint || displayName(entry.name)}
         </span>
         <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
-          {entry.username ? entry.name : (folder ?? entry.name)}
+          {entry.hint ? entry.name : (folder ?? entry.name)}
         </span>
       </button>
 
       <Button
-        aria-label={`Copy the password for ${entry.name}`}
+        aria-label={`Copy the ${SECRET_LABEL[entry.kind].toLowerCase()} for ${entry.name}`}
         className="size-7 flex-none"
         onClick={() => void onCopy(entry)}
         size="icon"
@@ -1236,11 +1236,15 @@ function NewLogin({
     setRefused(null);
     setTaken(false);
     try {
-      // A field left blank is left out rather than sent empty: the host
-      // writes no line for a field it was not given.
+      // Only the fields this kind asks for, and only the ones filled in: the
+      // website is seeded from the tab, and a card that kept it would be
+      // offered on that site as though it were a login.
+      const wanted = Object.fromEntries(
+        fieldsFor(kind).map((key) => [key, values[key]])
+      );
       const saved = await bridge.save({
         entry: name.trim(),
-        fields: toFields(values),
+        fields: toFields(wanted),
         kind,
         ...(kind === "identity" ? {} : { secret }),
       });
