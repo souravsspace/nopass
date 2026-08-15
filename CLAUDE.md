@@ -86,6 +86,18 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - INFERRED edges are the tool's guess, not a fact. Confirm one in the source before relying on it.
 - The graph is generated and git-ignored. Never edit it by hand.
 
+## 7. The Architecture Map
+
+**`diagram.md` at the root is the system architecture: every component, every boundary, every decision, in Mermaid.**
+
+Unlike `graphify-out/`, it is hand-written and committed. The graph says what imports what; `diagram.md` says what is trusted, what is refused, and why the shape is the shape.
+
+- Read it before any change that crosses a trust boundary — page ↔ content script, extension ↔ host, host ↔ store — or that touches the wire.
+- Update it in the same change, not later, when you add a component, a verb, a trust edge, or an ADR. A diagram that lies is worse than no diagram.
+- It is the map, not the argument. `docs/adr/` holds the reasoning; link to the ADR rather than restating it.
+- Keep every Mermaid block valid — a block that fails to parse renders as raw text on GitHub. Avoid `;` inside sequence-diagram notes.
+- Section 14 lists the invariants. Breaking one needs an ADR, not a patch.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
