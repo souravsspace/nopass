@@ -334,18 +334,14 @@ test.describe("cards and identities", () => {
 
   test("edits an entry, and asks before replacing it", async ({ page }) => {
     await scenario(page, "Unlocked");
-    await popup(page)
-      .getByRole("button", { name: VIEW_GITHUB })
-      .click();
+    await popup(page).getByRole("button", { name: VIEW_GITHUB }).click();
     await popup(page).getByRole("button", { name: "Edit" }).click();
 
     await popup(page).getByLabel("Username").fill("someone@else");
     await popup(page).getByRole("button", { name: "Save changes" }).click();
 
     // The first press asks; nothing has been written yet.
-    await expect(
-      popup(page).getByText(REPLACES_WHAT_IS_STORED)
-    ).toBeVisible();
+    await expect(popup(page).getByText(REPLACES_WHAT_IS_STORED)).toBeVisible();
     await expect(page.getByText(UPDATE_GITHUB)).toBeHidden();
 
     await popup(page).getByRole("button", { name: "Replace" }).click();
