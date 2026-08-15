@@ -175,5 +175,6 @@ GitHub release (`nopass update` reads it), then update the Homebrew tap.
 
 ## License
 
-nopass is MIT-licensed. By contributing you agree that your contribution is
-released under the same license, and that you have the right to release it.
+nopass is licensed under the [GNU AGPLv3](LICENSE). By contributing you agree
+that your contribution is released under the same license, and that you have
+the right to release it.
