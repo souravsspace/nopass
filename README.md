@@ -170,13 +170,40 @@ nopass insert -m notes/recovery     # multiline: paste, then Ctrl+D
 Names are paths — `web/github`, `work/aws/root`, anything. Directories are
 created on demand and cleaned up when emptied.
 
-An entry is just lines of text. Convention: password on line 1, anything
+An entry is just lines of text. Convention: the secret on line 1, anything
 else below:
 
 ```
 hunter2
 user: alice
 url: https://github.com/login
+```
+
+An entry can hold more than a login. A `type:` line says what it is, and each
+kind has its own fields — write them with `--field`, or later with `set`:
+
+```sh
+nopass insert --type card --field cardholder="Sana Qureshi" \
+              --field exp=04/2029 --field brand=Visa cards/visa
+nopass insert --type identity --field given-name=Sana --field family-name=Qureshi \
+              --field street="12 Example Road" --field city=Dhaka \
+              --field country=Bangladesh me/home
+
+nopass set web/github username=someone@else   # change one field
+nopass set web/github totp=                   # clear one
+nopass set web/github --secret 'new password' # change the first line
+nopass show --field username web/github       # print one field
+```
+
+`set` rewrites only the fields you name and leaves every other line of the
+entry alone, so notes and unknown fields survive. It will not create an entry
+— that is `insert` — and it will not remove one.
+
+```
+4111111111114242
+type: card
+cardholder: Sana Qureshi
+exp: 04/2029
 ```
 
 ### 4. Read passwords
