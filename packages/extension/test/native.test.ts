@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NativePort } from "../lib/native";
+import type { NativePort, RequestBody } from "../lib/native";
 import { HostError, NativeClient } from "../lib/native";
 
 const OFF_CONTRACT = /contract|invalid/i;
@@ -202,5 +202,54 @@ describe("NativeClient", () => {
     await expect(broken.request({ verb: "list" })).rejects.toMatchObject({
       code: "unavailable",
     });
+  });
+});
+
+describe("the request type", () => {
+  /*
+   * These assertions are checked by `tsc`, not by vitest: the bug they exist
+   * for — an `insert` still carrying the pre-v2 `password` and `url` keys —
+   * reached a shipped build because `RequestBody` collapsed the request union
+   * into its common keys and accepted anything. A wrong shape has to be a
+   * compile error, because at runtime it is a `bad_request` from the host and
+   * a save prompt that silently does nothing.
+   */
+  it("describes each verb's own fields", () => {
+    const insert: RequestBody = {
+      entry: "web/example.com",
+      fields: [{ key: "username", value: "sana" }],
+      kind: "login",
+      secret: "hunter2",
+      verb: "insert",
+    };
+    const update: RequestBody = {
+      entry: "web/example.com",
+      fields: [{ key: "username", value: "sana" }],
+      verb: "update",
+    };
+
+    expect(insert.verb).toBe("insert");
+    expect(update.verb).toBe("update");
+  });
+
+  it("refuses the shape the wire used before records", () => {
+    const legacy: RequestBody = {
+      entry: "web/example.com",
+      // @ts-expect-error `password` and `url` were replaced by `secret` and
+      // `fields` when entries gained kinds (ADR-0008).
+      password: "hunter2",
+      url: "https://example.com",
+      verb: "insert",
+    };
+
+    expect(legacy.verb).toBe("insert");
+  });
+
+  it("refuses a verb that does not exist", () => {
+    // @ts-expect-error `edit` is refused at the protocol layer, so there is
+    // no shape of it to build.
+    const nonsense: RequestBody = { entry: "web/example.com", verb: "edit" };
+
+    expect(nonsense).toBeTruthy();
   });
 });
