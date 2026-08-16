@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { loginFor, readLogin, submits, suggestedName } from "../lib/capture";
+import {
+  loginFor,
+  readLogin,
+  readSubmitted,
+  submits,
+  suggestedName,
+} from "../lib/capture";
 import { findLoginForms, type LoginForm } from "../lib/forms";
 
 function render(html: string): LoginForm[] {
@@ -129,5 +135,111 @@ describe("loginFor", () => {
 describe("suggestedName", () => {
   it("follows the convention the store already uses", () => {
     expect(suggestedName("github.com")).toBe("web/github.com");
+  });
+});
+
+describe("readSubmitted", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("reads a login when a password was typed", () => {
+    const forms = render(`
+      <form>
+        <input type="text" value="sana" />
+        <input type="password" value="hunter2" />
+      </form>
+    `);
+
+    expect(readSubmitted(document, first(forms))).toEqual({
+      fields: [{ key: "username", value: "sana" }],
+      kind: "login",
+      secret: "hunter2",
+    });
+  });
+
+  it("reads a card off a checkout", () => {
+    document.body.innerHTML = `
+      <form>
+        <input autocomplete="cc-name" value="Sana Qureshi" />
+        <input autocomplete="cc-number" value="4111 1111 1111 4242" />
+        <input autocomplete="cc-exp" value="04/29" />
+        <input autocomplete="cc-csc" value="737" />
+      </form>
+    `;
+
+    const captured = readSubmitted(document, null);
+    expect(captured?.kind).toBe("card");
+    // Spaces are how a card is printed, not how it is stored.
+    expect(captured?.secret).toBe("4111111111114242");
+    expect(captured?.fields).toContainEqual({
+      key: "cardholder",
+      value: "Sana Qureshi",
+    });
+    expect(captured?.fields).toContainEqual({ key: "exp-month", value: "04" });
+    expect(captured?.fields).toContainEqual({ key: "exp-year", value: "2029" });
+  });
+
+  it("keeps a security code out of what it offers to save", () => {
+    // Many issuers forbid storing one, and a prompt that quietly kept it
+    // would be making that decision for the user.
+    document.body.innerHTML = `
+      <form>
+        <input autocomplete="cc-number" value="4111111111114242" />
+        <input autocomplete="cc-csc" value="737" />
+      </form>
+    `;
+
+    const captured = readSubmitted(document, null);
+    expect(captured?.fields.map((field) => field.key)).not.toContain("cvv");
+  });
+
+  it("reads an address when enough of one was typed", () => {
+    document.body.innerHTML = `
+      <form>
+        <input autocomplete="given-name" value="Sana" />
+        <input autocomplete="family-name" value="Qureshi" />
+        <input autocomplete="address-line1" value="12 Example Road" />
+        <input autocomplete="address-level2" value="Dhaka" />
+        <input autocomplete="postal-code" value="1207" />
+      </form>
+    `;
+
+    const captured = readSubmitted(document, null);
+    expect(captured?.kind).toBe("identity");
+    expect(captured?.secret).toBeUndefined();
+    expect(captured?.fields).toContainEqual({ key: "city", value: "Dhaka" });
+  });
+
+  it("says nothing about a form with one address field filled in", () => {
+    // A newsletter box asking for a name is not an address worth keeping.
+    document.body.innerHTML = `
+      <form><input autocomplete="given-name" value="Sana" /></form>
+    `;
+
+    expect(readSubmitted(document, null)).toBeNull();
+  });
+
+  it("prefers the login when a page has both", () => {
+    const forms = render(`
+      <form>
+        <input type="text" value="sana" />
+        <input type="password" value="hunter2" />
+        <input autocomplete="cc-number" value="4111111111114242" />
+      </form>
+    `);
+
+    expect(readSubmitted(document, first(forms))?.kind).toBe("login");
+  });
+
+  it("says nothing about an empty form", () => {
+    document.body.innerHTML = `
+      <form>
+        <input autocomplete="cc-number" />
+        <input autocomplete="given-name" />
+      </form>
+    `;
+
+    expect(readSubmitted(document, null)).toBeNull();
   });
 });
