@@ -1,0 +1,99 @@
+---
+/**
+ * nopass, in depth.
+ *
+ * The sections come from `lib/docs.ts` and are rendered here as HTML and at
+ * `/docs.md` as plain markdown. Headings carry stable ids so a link — or a
+ * citation — can point at one answer rather than at a page.
+ */
+import Base from "../layouts/Base.astro";
+import { SECTIONS } from "../lib/docs";
+import { marked } from "../lib/markdown";
+import { canonical, SITE } from "../lib/site";
+
+const description =
+  "How nopass works: the encrypted store, the command line, git sync, the browser extension, the agent, passkeys, and what the security model does and does not cover.";
+
+const schema = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      about: "nopass, an open source password manager",
+      description,
+      headline: "nopass documentation",
+      inLanguage: "en",
+      url: canonical("/docs"),
+    },
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", item: SITE.url, name: "Home", position: 1 },
+        {
+          "@type": "ListItem",
+          item: canonical("/docs"),
+          name: "Docs",
+          position: 2,
+        },
+      ],
+    },
+  ],
+};
+---
+
+<Base description={description} path="/docs" schema={schema} title="Docs">
+  <div class="mx-auto max-w-5xl gap-10 px-6 py-16 lg:flex">
+    <nav
+      aria-label="On this page"
+      class="mb-10 shrink-0 lg:sticky lg:top-8 lg:mb-0 lg:h-fit lg:w-56"
+    >
+      <p
+        class="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.08em]"
+      >
+        On this page
+      </p>
+      <ul class="mt-3 space-y-1.5">
+        {
+          SECTIONS.map((section) => (
+            <li>
+              <a
+                class="text-[13px] text-muted-foreground hover:text-foreground"
+                href={`#${section.id}`}
+              >
+                {section.title}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="mt-6 text-[12px] text-muted-foreground">
+        <a class="underline underline-offset-2" href="/docs.md">Plain markdown</a
+        > · <a class="underline underline-offset-2" href="/llms.txt">llms.txt</a>
+      </p>
+    </nav>
+
+    <article class="prose-nopass min-w-0 flex-1">
+      <h1
+        class="font-display font-medium text-[40px] leading-tight tracking-[-0.011em]"
+      >
+        nopass documentation
+      </h1>
+      <p class="mt-3 text-[17px] text-muted-foreground leading-relaxed">
+        {description}
+      </p>
+
+      {
+        SECTIONS.map((section) => (
+          <section id={section.id}>
+            <h2>
+              <a class="no-underline" href={`#${section.id}`}>
+                {section.title}
+              </a>
+            </h2>
+            <Fragment set:html={marked(section.body)} />
+          </section>
+        ))
+      }
+    </article>
+  </div>
+</Base>
