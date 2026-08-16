@@ -18,6 +18,11 @@
       "!**/dist",
       "!**/coverage",
       "!**/playwright-report",
+      // Biome parses `.astro` frontmatter as a standalone module, so an
+      // import used only by the template below it reads as unused — and its
+      // autofix removes it. `astro build` type-checks these files.
+      "!**/*.astro",
+      "!**/public/*.svg",
       "!**/test-results",
       "!target",
       "!result"
