@@ -124,6 +124,9 @@ flowchart TB
 | `packages/extension` | Every entrypoint, library and test for the extension itself (ADR-0003). |
 | `tools/chrome`, `tools/firefox` | Thin WXT configs: browser target, extension ID, output directory, and nothing else. |
 | `tools/workbench` | The real popup and the real dropdown renderer over a mock bridge, driven by Playwright. |
+| `apps/web` | The site: an Astro landing page and the docs, over the same tokens as the popup. |
+| `tools/demo` | Pages to try the extension against, and the fixtures the browser suite drives. |
+| `tools/browser` | The extension in a real browser, against the real host and a real store. |
 | `packaging/` | Homebrew formula, Nix derivations, the npm shim. |
 | `docs/adr/` | Numbered decisions. `docs/architecture/` — the bridge in prose. |
 
@@ -675,6 +678,7 @@ timeline
     2026-08-15 : ADR-0007 a page may offer a login; only the user may name one
                : ADR-0008 an entry says what it is, on a type line
                : ADR-0009 the extension may rewrite an entry, field by field
+    2026-08-16 : ADR-0010 nopass is the authenticator, and the CLI is where it starts
 ```
 
 | ADR | Decision | What it bought | What it cost |
@@ -688,6 +692,7 @@ timeline
 | [0007](docs/adr/0007-saving-a-login-from-the-page.md) | A content script may offer a captured login and name one; it may not compose a save | The prompt appears at the moment the login is typed, where it belongs | Three more words in the content script's vocabulary |
 | [0008](docs/adr/0008-typed-records-in-the-entry-body.md) | A `type:` line names what an entry holds; each kind claims its own keys | Cards and identities are ordinary entries — same crypto, same sync, still hand-editable | Two vocabularies to keep in step: aliases on disk, canonical keys on the wire |
 | [0009](docs/adr/0009-updating-an-entry-from-the-extension.md) | `update` rewrites named fields of an entry that exists, behind a confirmation | An expiry, an address, a username can be fixed where they are noticed | A compromised extension can rewrite what it can already read |
+| [0010](docs/adr/0010-nopass-as-a-webauthn-authenticator.md) | nopass generates and signs with P-256 passkeys; the CLI is the first surface | Passkeys live in the store like anything else, and the crypto is provable on its own | Losing the store now loses accounts, not only passwords |
 
 Two decisions were made the same way and are worth reading as a pair: ADR-0002
 rejected writing because nopass authenticates every mutation and a native host
@@ -721,12 +726,13 @@ Where each layer is tested:
 
 | Layer | Covered by |
 |---|---|
-| Store, crypto, slots, agent | `cargo test -p nopass-core` |
+| Store, crypto, slots, agent, records, passkeys | `cargo test -p nopass-core` |
 | CLI behaviour end to end | `crates/nopass-cli/tests/cli.rs` |
 | Framing, dispatch, refusals, origin matching | `crates/nopass-host/tests/` |
 | The wire contract, both sides | `packages/protocol/fixtures/messages.json` + `crates/nopass-host/tests/contract.rs` |
 | Form finding, capture, dropdown, prompt, session reducer | `packages/extension/test/` (vitest, happy-dom) |
 | The popup as a user drives it | `tools/workbench/e2e/` (Playwright, real components, mock bridge) |
+| The extension as a browser drives it | `tools/browser/e2e/` (Playwright, **real** host, **real** encrypted store) |
 
 Distribution: crates.io, npm, Nix, a Homebrew tap, and prebuilt binaries on the
 release. Four channels and no more — each extra one wanted an account, a review
