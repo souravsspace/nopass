@@ -21,10 +21,14 @@ straight into the CLI. No external key tooling required.
 - [`crates/nopass-cli`](crates/nopass-cli) — the `nopass` CLI binary
 - [`crates/nopass-host`](crates/nopass-host) — native messaging host the
   browser extension talks to
-- [`packages/extension`](packages/extension) — the browser extension, which
-  fills and creates but never rewrites
+- [`packages/extension`](packages/extension) — the browser extension: fills
+  logins, cards and addresses, creates entries, and changes fields of one
   ([GUIDE.md](GUIDE.md))
-- `apps/web` — marketing site *(planned)*
+- [`tools/demo`](tools/demo) — pages to try the extension against
+  (`bun run demo`), and the fixtures the browser tests drive
+- [`tools/browser`](tools/browser) — the extension in a real browser, against
+  the real host and a real store
+- [`apps/web`](apps/web) — the site: a landing page and the docs, in Astro
 - `apps/desktop` — desktop app, Tauri over nopass-core *(planned)*
 - `apps/mobile` — mobile app *(planned)*
 
@@ -541,6 +545,7 @@ identities in temp dirs, and sync tests push to local bare repos.
 Patches welcome — [CONTRIBUTING.md](CONTRIBUTING.md) covers the layout, the
 test harnesses, and the house rules. [diagram.md](diagram.md) is the system
 architecture in diagrams: every component, boundary and decision on one page.
+[DESIGN.md](DESIGN.md) is how it should look and read.
 
 ## License
 
