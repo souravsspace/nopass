@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "turbo run build //#build:rust",
+    "demo": "bun run --cwd tools/demo serve",
     "build:rust": "cargo build --workspace --release",
     "check-types": "turbo run check-types",
     "e2e": "turbo run e2e",
