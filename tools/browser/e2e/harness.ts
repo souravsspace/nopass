@@ -15,14 +15,20 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   type BrowserContext,
+  test as base,
   chromium,
   type Page,
-  test as base,
 } from "@playwright/test";
 
 const REPO = resolve(import.meta.dirname, "../../..");
@@ -42,7 +48,8 @@ export const DEMO = "http://127.0.0.1:8790";
  */
 async function extensionId(context: BrowserContext): Promise<string> {
   const worker =
-    context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+    context.serviceWorkers()[0] ??
+    (await context.waitForEvent("serviceworker"));
   return new URL(worker.url()).host;
 }
 
@@ -51,10 +58,10 @@ export interface Store {
   readonly dir: string;
   /** Write an entry, the way a user would from a terminal. */
   insert(name: string, kind: string, secret: string, fields: string[]): void;
-  /** The decrypted body of an entry, for asserting what actually landed. */
-  show(name: string): string;
   /** Every entry name currently in the store. */
   list(): string[];
+  /** The decrypted body of an entry, for asserting what actually landed. */
+  show(name: string): string;
 }
 
 function makeStore(root: string): Store {
@@ -121,23 +128,13 @@ function registerHost(profile: string, id: string): void {
 }
 
 interface Fixtures {
-  /** The store this test's browser is looking at. */
-  store: Store;
   /** A page with the extension loaded and the host registered. */
   page: Page;
+  /** The store this test's browser is looking at. */
+  store: Store;
 }
 
 export const test = base.extend<Fixtures>({
-  // biome-ignore lint/correctness/noEmptyPattern: Playwright's fixture signature
-  store: async ({}, use) => {
-    const root = mkdtempSync(join(tmpdir(), "nopass-e2e-"));
-    try {
-      await use(makeStore(root));
-    } finally {
-      rmSync(root, { force: true, recursive: true });
-    }
-  },
-
   page: async ({ store }, use) => {
     const profile = mkdtempSync(join(tmpdir(), "nopass-profile-"));
     const env = {
@@ -177,6 +174,15 @@ export const test = base.extend<Fixtures>({
     } finally {
       await context.close();
       rmSync(profile, { force: true, recursive: true });
+    }
+  },
+  // biome-ignore lint/correctness/noEmptyPattern: Playwright's fixture signature
+  store: async ({}, use) => {
+    const root = mkdtempSync(join(tmpdir(), "nopass-e2e-"));
+    try {
+      await use(makeStore(root));
+    } finally {
+      rmSync(root, { force: true, recursive: true });
     }
   },
 });

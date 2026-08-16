@@ -24,10 +24,10 @@ const POSITION: Record<Panel, string> = {
 };
 
 export interface Box {
+  height: number;
+  width: number;
   x: number;
   y: number;
-  width: number;
-  height: number;
 }
 
 async function boxOf(page: Page, panel: Panel): Promise<Box | null> {
@@ -74,6 +74,30 @@ export async function panel(page: Page, which: Panel): Promise<Box> {
 export async function panelIsOpen(page: Page, which: Panel): Promise<boolean> {
   const box = await boxOf(page, which);
   return box !== null && box.height > 0;
+}
+
+/**
+ * Put the cursor in a field and wait for the panel it should raise.
+ *
+ * The content script is injected at `document_idle`, so a test that focuses
+ * a field the instant a page settles can beat it there — a person cannot,
+ * but `page.focus` can. Focus is given up and taken again rather than waited
+ * out, because a focus that arrived too early raises nothing and no later
+ * event will.
+ */
+export async function focusField(page: Page, selector: string): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await page.focus(selector);
+    for (let tick = 0; tick < 10; tick++) {
+      if (await panelIsOpen(page, "dropdown")) {
+        return;
+      }
+      await page.waitForTimeout(100);
+    }
+    await page.locator(selector).blur();
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`no dropdown appeared under ${selector}`);
 }
 
 /**

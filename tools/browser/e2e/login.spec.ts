@@ -8,6 +8,7 @@
 
 import { DEMO, expect, test } from "./harness";
 import {
+  focusField,
   panel,
   panelIsOpen,
   pickRow,
@@ -25,7 +26,7 @@ test("offers a stored login on the site it belongs to, and fills it", async ({
   ]);
 
   await page.goto(`${DEMO}/login.html`);
-  await page.focus("#password");
+  await focusField(page, "#password");
   await pickRow(page, 0, 1);
 
   await expect(page.locator("#email")).toHaveValue("sana@example.com");
@@ -121,7 +122,7 @@ test("offers the account field of a two-step sign-in", async ({
   ]);
 
   await page.goto(`${DEMO}/two-step.html`);
-  await page.focus("#identifier");
+  await focusField(page, "#identifier");
   await pickRow(page, 0, 1);
 
   await expect(page.locator("#identifier")).toHaveValue("sana@example.com");
