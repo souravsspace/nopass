@@ -199,6 +199,17 @@ carries more of the number than a receipt would print.
 > card issuers forbid keeping it, and a stored code turns a stolen store into
 > a usable card.
 
+### Saving one from a page
+
+Type a card into a checkout and submit it, and nopass asks whether to keep
+it — the same prompt a login gets, with a name you can rewrite. An address
+form works the same way once three of its parts are filled in.
+
+Two things it will not do. It stays quiet when the store already holds a card
+ending in those four digits, or a person with that name. And it does not keep
+the security code, because card networks forbid storing one: add it on the
+entry screen if you want it.
+
 ### Changing what is stored
 
 Open an entry and press **Edit**. The fields become inputs, and saving asks
