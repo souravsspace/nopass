@@ -41,8 +41,14 @@ export type PopupRequest =
   | { kind: "search"; origin: string }
   | { kind: "reveal"; entry: string }
   | { kind: "generate"; length: number; symbols: boolean }
-  | ({ kind: "save" } & Draft)
-  | ({ kind: "update" } & Patch)
+  /*
+   * The payload is nested rather than spread. A draft carries the record's
+   * own `kind` — `card`, `identity` — and spreading it beside the message's
+   * `kind` made the two collide into an impossible type, which is how a save
+   * that no longer matched the wire went unnoticed.
+   */
+  | { kind: "save"; draft: Draft }
+  | { kind: "update"; patch: Patch }
   | { kind: "items"; kinds?: Kind[] }
   | { kind: "fill"; entry: string; tabId: number };
 
