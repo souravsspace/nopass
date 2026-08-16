@@ -116,10 +116,17 @@ export function fieldKeyOf(input: HTMLInputElement): string | null {
     }
   }
 
-  const described = `${input.name} ${input.id}`;
-  for (const [pattern, key] of PATTERNS) {
-    if (pattern.test(described)) {
-      return key;
+  // One attribute at a time. Joined into a single string, an anchored
+  // pattern — `^city$`, `^zip$` — could never match, which is how a plainly
+  // named city box went unrecognised on a real form.
+  for (const described of [input.name, input.id]) {
+    if (!described) {
+      continue;
+    }
+    for (const [pattern, key] of PATTERNS) {
+      if (pattern.test(described)) {
+        return key;
+      }
     }
   }
   return null;
