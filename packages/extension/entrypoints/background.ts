@@ -21,6 +21,9 @@ const HOST_NAME = "com.nopass.host";
 /** How much of a card number a prompt or a row may show. */
 const CARD_TAIL = 4;
 
+/** Run of whitespace, for turning a name into a name a path can hold. */
+const SPACES = /\s+/g;
+
 export default defineBackground(() => {
   const client = new NativeClient(
     () => browser.runtime.connectNative(HOST_NAME) as unknown as NativePort
@@ -146,8 +149,8 @@ export default defineBackground(() => {
    * A page with no content script in it — a settings page, a PDF, one that is
    * mid-navigation — is not a fault; there is simply nowhere to ask.
    */
-  function tell(tabId: number, offer: SaveOffer): Promise<void> {
-    const command: OfferCommand = { kind: "offerSave", offer };
+  function tell(tabId: number, details: SaveOffer): Promise<void> {
+    const command: OfferCommand = { kind: "offerSave", offer: details };
     return browser.tabs
       .sendMessage(tabId, command)
       .then(() => undefined)
@@ -403,7 +406,7 @@ export default defineBackground(() => {
     const details: SaveOffer = {
       host,
       kind: record.kind,
-      suggestion: suggestFor(record, host, detail),
+      suggestion: suggestFor(record, host),
       ...(detail ? { detail } : {}),
     };
     offered.set(tabId, { offer: details, origin, pushed: false, record });
@@ -441,11 +444,7 @@ export default defineBackground(() => {
   }
 
   /** The name to offer, which is a guess the user can rewrite. */
-  function suggestFor(
-    record: CapturedRecord,
-    host: string,
-    detail: string | undefined
-  ): string {
+  function suggestFor(record: CapturedRecord, host: string): string {
     if (record.kind === "card") {
       const brand = record.fields.find((field) => field.key === "brand")?.value;
       const tail = (record.secret ?? "").slice(-CARD_TAIL);
@@ -455,7 +454,7 @@ export default defineBackground(() => {
       const given = record.fields.find(
         (field) => field.key === "given-name"
       )?.value;
-      return `me/${(given ?? "details").toLowerCase().replace(/\s+/g, "-")}`;
+      return `me/${(given ?? "details").toLowerCase().replace(SPACES, "-")}`;
     }
     return suggestedName(host);
   }
@@ -473,6 +472,17 @@ export default defineBackground(() => {
     record: CapturedRecord,
     detail: string | undefined
   ): Promise<boolean> {
+    if (record.kind === "card") {
+      const tail = (record.secret ?? "").slice(-CARD_TAIL);
+      const { items } = await client.request({
+        kinds: ["card"],
+        verb: "items",
+      });
+      // The same card is the one ending in the same four digits, whatever the
+      // page did or did not say about the brand.
+      return items.some((item) => (item.hint ?? "").endsWith(tail));
+    }
+
     if (record.kind === "login") {
       const username =
         record.fields.find((field) => field.key === "username")?.value ?? "";
@@ -488,13 +498,8 @@ export default defineBackground(() => {
       verb: "items",
     });
 
-    // A card is the same card if it ends in the same four digits, whatever
-    // the page did or did not say about the brand. An identity is the same
-    // person if the row reads the same, which is the name the host built.
-    if (record.kind === "card") {
-      const tail = (record.secret ?? "").slice(-CARD_TAIL);
-      return items.some((item) => (item.hint ?? "").endsWith(tail));
-    }
+    // An identity is the same person if the row reads the same, which is the
+    // name the host built for it.
     return items.some((item) => item.hint === detail);
   }
 

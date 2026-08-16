@@ -107,6 +107,10 @@ const IDENTITY_FIELDS = [
 ];
 const ENOUGH_OF_AN_ADDRESS = 3;
 
+/** How a card number is printed, and how an expiry is written. */
+const SPACES_AND_DASHES = /[\s-]/g;
+const EXPIRY_SEPARATOR = /[/-]/;
+
 /**
  * What the page was just given, if it is worth offering to keep.
  *
@@ -142,7 +146,7 @@ export function readSubmitted(
 }
 
 function readCard(filled: Map<string, string>): CapturedRecord | null {
-  const number = filled.get(CARD_NUMBER)?.replace(/[\s-]/g, "");
+  const number = filled.get(CARD_NUMBER)?.replace(SPACES_AND_DASHES, "");
   if (!number) {
     return null;
   }
@@ -173,8 +177,9 @@ function readCard(filled: Map<string, string>): CapturedRecord | null {
 /** `04/29` in one box, or a month and a year in two. Always four-digit year. */
 function expiry(filled: Map<string, string>): [string?, string?] {
   const combined = filled.get("exp");
-  const month = filled.get("exp-month") ?? combined?.split(/[/-]/)[0]?.trim();
-  const year = filled.get("exp-year") ?? combined?.split(/[/-]/)[1]?.trim();
+  const parts = combined?.split(EXPIRY_SEPARATOR);
+  const month = filled.get("exp-month") ?? parts?.[0]?.trim();
+  const year = filled.get("exp-year") ?? parts?.[1]?.trim();
   if (!(month && year)) {
     return [];
   }
