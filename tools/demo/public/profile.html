@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Profile — nopass demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/demo.css" />
+<main>
+  <h1>Your details</h1>
+  <p>
+    Half of these name themselves properly; the rest are named the way a real
+    form is, so the fallback has something to chew on.
+  </p>
+  <form action="/done.html" method="get">
+    <div class="row">
+      <div>
+        <label for="firstName">First name</label>
+        <input id="firstName" name="firstName" />
+      </div>
+      <div>
+        <label for="lastName">Last name</label>
+        <input id="lastName" name="lastName" />
+      </div>
+    </div>
+    <label for="email">Email</label>
+    <input autocomplete="email" id="email" name="email" type="email" />
+    <label for="phone">Phone</label>
+    <input id="phone" name="phone" type="tel" />
+    <label for="address1">Address</label>
+    <input autocomplete="address-line1" id="address1" name="address1" />
+    <label for="city">City</label>
+    <input id="city" name="city" />
+    <div class="row">
+      <div>
+        <label for="postcode">Postcode</label>
+        <input id="postcode" name="postcode" />
+      </div>
+      <div>
+        <label for="country">Country</label>
+        <input autocomplete="country-name" id="country" name="country" />
+      </div>
+    </div>
+    <button type="submit">Save details</button>
+  </form>
+</main>

@@ -1,0 +1,13 @@
+{
+  "name": "@nopass/demo",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check-types": "echo 'the demo is static html' && exit 0",
+    "dev": "bun run serve.ts",
+    "lint": "biome check .",
+    "serve": "bun run serve.ts",
+    "test": "echo 'the demo is a fixture; tools/browser drives it' && exit 0"
+  }
+}

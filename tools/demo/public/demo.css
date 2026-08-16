@@ -1,0 +1,57 @@
+/*
+ * The Sana palette, hand-written: this page is a fixture, not an app, and it
+ * should look like the product it is testing without pulling a build step in.
+ */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f5f4;
+  --card: #ffffff;
+  --ink: #191817;
+  --muted: #615d59;
+  --line: #e6e6e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1b1b1a; --card: #272623; --ink: #edecea; --muted: #a39e98; --line: #33322f; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 48px 20px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 34rem; margin: 0 auto; }
+h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; font-size: 32px; margin: 0 0 8px; }
+h2 { font-size: 15px; font-weight: 600; margin: 24px 0 8px; }
+.lede, p { color: var(--muted); }
+a { color: var(--ink); }
+form, .pages { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.pages { list-style: none; margin: 24px 0 0; padding: 8px; }
+.pages li { padding: 10px 12px; border-radius: 8px; }
+.pages li + li { border-top: 1px solid var(--line); }
+.pages span { display: block; color: var(--muted); font-size: 13px; }
+label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+input {
+  width: 100%;
+  padding: 9px 11px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+button {
+  margin-top: 20px;
+  padding: 9px 16px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--ink);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.row { display: flex; gap: 12px; }
+.row > div { flex: 1; }
+.note { font-size: 12px; margin-top: 16px; }
