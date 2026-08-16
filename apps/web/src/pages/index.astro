@@ -1,0 +1,263 @@
+---
+/**
+ * The landing page.
+ *
+ * Answer-first, in the site's voice: what it is in the first sentence, why it
+ * is different immediately under it, and the install line above the fold. The
+ * FAQ at the bottom is written as questions people actually ask, and is
+ * mirrored into FAQPage schema — the part an answer engine quotes.
+ */
+import { Install } from "../components/install";
+import { Reveal } from "../components/reveal";
+import Base from "../layouts/Base.astro";
+import { canonical, SITE } from "../lib/site";
+
+const differences = [
+  {
+    body: "Every entry is one age-encrypted file in a directory tree you can list, back up, and read with any age client. No proprietary vault format, no export button to hope for.",
+    title: "The store is a folder",
+  },
+  {
+    body: "There is no nopass server, no account and no sync service. Point the store at a git remote you own and every change commits, pulls and pushes itself.",
+    title: "Sync is your git remote",
+  },
+  {
+    body: "The browser extension talks to a local binary over native messaging. Nothing listens on a port, and nothing is running when the browser is closed.",
+    title: "No localhost server",
+  },
+  {
+    body: "Logins, cards, addresses and passkeys, filled from the same store. The extension can create an entry and change fields of one — it can never move or delete what is there.",
+    title: "More than passwords",
+  },
+];
+
+const steps = [
+  {
+    body: "One command makes your keypair and the store. The private key is written already encrypted with your passphrase.",
+    command: "nopass init",
+    title: "Make a store",
+  },
+  {
+    body: "Type it, generate it, or let the browser offer to keep the one you just used on a site.",
+    command: "nopass generate web/github 32",
+    title: "Add a login",
+  },
+  {
+    body: "Focus a field and pick the entry. Cards and addresses fill the whole form from one pick.",
+    command: "nopass show -c web/github",
+    title: "Use it anywhere",
+  },
+];
+
+const faq = [
+  {
+    answer:
+      "No. There is no nopass service, no account, and nothing to sign up for. The store is a directory on your disk, and syncing it — if you want to — happens over a git remote you control.",
+    question: "Does nopass have a server or an account?",
+  },
+  {
+    answer:
+      "Every entry is encrypted with the age format: X25519 key agreement and ChaCha20-Poly1305 authenticated encryption, to the public keys listed in the nearest .nopass-id file. Your secret key never leaves the machine.",
+    question: "How are passwords encrypted?",
+  },
+  {
+    answer:
+      "Yes. nopass acts as a WebAuthn authenticator: it generates the P-256 keypair, stores the private half as an ordinary encrypted entry, and signs a site's challenge with it. Today that runs from the command line with nopass webauthn; browser sign-in is the next milestone.",
+    question: "Can nopass hold passkeys?",
+  },
+  {
+    answer:
+      "Entry names are file names, so they are not encrypted — do not put a secret in a name. The clipboard is not cleared by the extension. And the prompt before a write is a check that you are at the keyboard, not cryptography: anything running as you can add entries with the public key alone.",
+    question: "What does nopass deliberately not protect?",
+  },
+  {
+    answer:
+      "Chrome, Chromium, Brave, Edge and Firefox, on macOS and Linux. The extension is one source built for two browser targets, and it registers a native messaging host with whichever you use.",
+    question: "Which browsers does the extension support?",
+  },
+  {
+    answer:
+      "Copy your identity file to the second machine and clone the store from your git remote. Same key, same store, nothing else to configure.",
+    question: "How do I use it on a second machine?",
+  },
+];
+
+const schema = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      applicationCategory: "SecurityApplication",
+      description: SITE.description,
+      downloadUrl: `${SITE.repository}/releases/latest`,
+      license: `${SITE.repository}/blob/main/LICENSE`,
+      name: "nopass",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      operatingSystem: "macOS, Linux",
+      url: SITE.url,
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: faq.map((entry) => ({
+        "@type": "Question",
+        acceptedAnswer: { "@type": "Answer", text: entry.answer },
+        name: entry.question,
+      })),
+    },
+  ],
+};
+---
+
+<Base
+  description={SITE.description}
+  path="/"
+  schema={schema}
+  title="nopass"
+>
+  <section class="mx-auto max-w-5xl px-6 pt-20 pb-16">
+    <p
+      class="font-medium text-[12px] text-muted-foreground uppercase tracking-[0.08em]"
+    >
+      Open source password manager
+    </p>
+    <h1
+      class="mt-3 max-w-3xl font-display font-medium text-[clamp(2.5rem,6vw,4rem)] leading-[1.05] tracking-[-0.011em]"
+    >
+      Your passwords, in a folder you own.
+    </h1>
+    <p class="mt-5 max-w-2xl text-[17px] text-muted-foreground leading-relaxed">
+      nopass keeps every login, card, address and passkey as an individually
+      encrypted file on your disk. It fills them in your browser, syncs over
+      your own git remote, and has no server, no account and nothing to
+      subscribe to.
+    </p>
+
+    <div class="mt-8 max-w-2xl">
+      <Install client:load />
+      <p class="mt-3 text-[13px] text-muted-foreground">
+        macOS and Linux. Then run <code class="font-mono text-[12px]"
+          >nopass init</code
+        > and you have a store.
+      </p>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 py-12" id="why">
+    <Reveal client:visible>
+      <h2 class="font-display font-medium text-[28px] tracking-[-0.011em]">
+        Why it is different
+      </h2>
+      <p class="mt-2 max-w-2xl text-muted-foreground">
+        Most managers ask you to trust a company with a vault. nopass asks you
+        to keep a folder.
+      </p>
+    </Reveal>
+
+    <div class="mt-8 grid gap-4 sm:grid-cols-2">
+      {
+        differences.map((item, index) => (
+          <Reveal client:visible delay={index * 0.05}>
+            <article class="h-full rounded-xl border bg-card p-5">
+              <h3 class="font-semibold text-[15px]">{item.title}</h3>
+              <p class="mt-2 text-[14px] text-muted-foreground leading-relaxed">
+                {item.body}
+              </p>
+            </article>
+          </Reveal>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 py-12" id="how">
+    <Reveal client:visible>
+      <h2 class="font-display font-medium text-[28px] tracking-[-0.011em]">
+        How it works
+      </h2>
+    </Reveal>
+
+    <ol class="mt-8 grid gap-4 sm:grid-cols-3">
+      {
+        steps.map((step, index) => (
+          <Reveal client:visible delay={index * 0.05}>
+            <li class="h-full rounded-xl border bg-card p-5">
+              <span class="font-mono text-[12px] text-muted-foreground">
+                0{index + 1}
+              </span>
+              <h3 class="mt-2 font-semibold text-[15px]">{step.title}</h3>
+              <p class="mt-2 text-[14px] text-muted-foreground leading-relaxed">
+                {step.body}
+              </p>
+              <pre class="mt-3 overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-[12px]">{step.command}</pre>
+            </li>
+          </Reveal>
+        ))
+      }
+    </ol>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 py-12" id="security">
+    <Reveal client:visible>
+      <div class="rounded-xl border bg-card p-6 sm:p-8">
+        <h2 class="font-display font-medium text-[28px] tracking-[-0.011em]">
+          What it does not do
+        </h2>
+        <p class="mt-2 max-w-2xl text-muted-foreground">
+          A manager that oversells its guarantees is worse than a plain one.
+        </p>
+        <ul class="mt-5 grid gap-3 text-[14px] text-muted-foreground sm:grid-cols-2">
+          <li>
+            <strong class="text-foreground">Entry names are not encrypted.</strong>
+            They are file names. Do not put a secret in one.
+          </li>
+          <li>
+            <strong class="text-foreground">The clipboard is not cleared</strong>
+            by the extension — the popup is gone by then and cannot.
+          </li>
+          <li>
+            <strong class="text-foreground">The write prompt is a program check</strong>,
+            not cryptography. It defends a borrowed terminal, not a compromised
+            account.
+          </li>
+          <li>
+            <strong class="text-foreground">Losing the store loses passkeys.</strong>
+            The site keeps the other half of the key and there is no password to
+            fall back on. Back the store up.
+          </li>
+        </ul>
+      </div>
+    </Reveal>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 py-12" id="faq">
+    <Reveal client:visible>
+      <h2 class="font-display font-medium text-[28px] tracking-[-0.011em]">
+        Questions
+      </h2>
+    </Reveal>
+
+    <dl class="mt-6 divide-y rounded-xl border bg-card">
+      {
+        faq.map((entry) => (
+          <div class="px-5 py-4">
+            <dt class="font-semibold text-[15px]">{entry.question}</dt>
+            <dd class="mt-1.5 text-[14px] text-muted-foreground leading-relaxed">
+              {entry.answer}
+            </dd>
+          </div>
+        ))
+      }
+    </dl>
+
+    <p class="mt-8 text-[14px] text-muted-foreground">
+      More in the <a class="underline underline-offset-2" href="/docs">docs</a>,
+      or read the source at
+      <a
+        class="underline underline-offset-2"
+        href={SITE.repository}
+        rel="noreferrer"
+        target="_blank">github.com/souravsspace/nopass</a
+      >. Machines: <a class="underline underline-offset-2" href={canonical("/llms.txt")}>llms.txt</a>.
+    </p>
+  </section>
+</Base>
