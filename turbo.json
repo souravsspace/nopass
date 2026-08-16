@@ -10,7 +10,7 @@
       "dependsOn": ["^build"]
     },
     "e2e": {
-      "dependsOn": ["build", "//#build:rust"],
+      "dependsOn": ["^build", "build", "//#build:rust"],
       "outputs": ["playwright-report/**", "test-results/**"]
     },
     "lint": {},
