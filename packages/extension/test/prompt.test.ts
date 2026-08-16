@@ -12,11 +12,12 @@ function view(
   over: Partial<Parameters<typeof renderSavePrompt>[1]> = {}
 ) {
   renderSavePrompt(root, {
+    detail: "sana@example.com",
     host: "github.com",
+    kind: "login",
     onDismiss: () => undefined,
     onSave: () => undefined,
     suggestion: "web/github.com",
-    username: "sana@example.com",
     ...over,
   });
 }
@@ -56,7 +57,7 @@ describe("renderSavePrompt", () => {
   });
 
   it("falls back to the host when the page had no username field", () => {
-    view(root, { username: undefined });
+    view(root, { detail: undefined });
 
     expect(root.querySelector(".np-save-meta")?.textContent).toBe("github.com");
   });
@@ -90,6 +91,18 @@ describe("renderSavePrompt", () => {
 
     expect(onDismiss).toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("asks the question that suits what was submitted", () => {
+    view(root, { detail: "•••• 4242", kind: "card" });
+    expect(root.querySelector(".np-save-title")?.textContent).toBe(
+      "Save this card?"
+    );
+
+    view(root, { detail: "Sana Qureshi", kind: "identity" });
+    expect(root.querySelector(".np-save-title")?.textContent).toBe(
+      "Save these details?"
+    );
   });
 
   it("replaces the panel rather than stacking a second one", () => {
