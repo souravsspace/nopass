@@ -1,0 +1,114 @@
+---
+/**
+ * Every page's head, nav and footer.
+ *
+ * The metadata here is the whole SEO surface: one title, one description, a
+ * canonical, Open Graph, and a JSON-LD block a page passes in. There is no
+ * analytics script and no font request — a site whose product's claim is that
+ * nothing leaves your machine should not put a tracker on the page that says
+ * so.
+ */
+import { canonical, SITE } from "../lib/site";
+import "../styles/site.css";
+
+interface Props {
+  description: string;
+  path: string;
+  /** JSON-LD, already an object. Rendered into a script tag. */
+  schema?: Record<string, unknown>;
+  title: string;
+}
+
+const { title, description, path, schema } = Astro.props;
+const url = canonical(path);
+const fullTitle =
+  path === "/" ? `${SITE.name} — ${SITE.tagline}` : `${title} — ${SITE.name}`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={url} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE.name} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={url} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+
+    {
+      schema && (
+        <script
+          is:inline
+          type="application/ld+json"
+          set:html={JSON.stringify(schema)}
+        />
+      )
+    }
+
+    <script is:inline>
+      // Light or dark is the system's call, matching the popup. Inline and
+      // first so a reader in dark mode never sees a white flash.
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
+  </head>
+
+  <body class="min-h-dvh">
+    <a
+      class="sr-only rounded-md bg-primary px-3 py-2 text-primary-foreground focus:not-sr-only focus:absolute focus:top-3 focus:left-3"
+      href="#main">Skip to content</a
+    >
+
+    <header class="border-b">
+      <nav
+        aria-label="Main"
+        class="mx-auto flex max-w-5xl items-center gap-6 px-6 py-4"
+      >
+        <a class="flex items-center gap-2 font-display text-[17px]" href="/">
+          <span
+            class="inline-flex size-6 items-center justify-center rounded-sm bg-primary font-medium text-[15px] text-primary-foreground leading-none"
+            >n</span
+          >
+          nopass
+        </a>
+        <div class="flex-1"></div>
+        <a class="text-[14px] text-muted-foreground hover:text-foreground" href="/docs"
+          >Docs</a
+        >
+        <a
+          class="text-[14px] text-muted-foreground hover:text-foreground"
+          href={SITE.repository}
+          rel="noreferrer"
+          target="_blank">GitHub</a
+        >
+      </nav>
+    </header>
+
+    <main id="main"><slot /></main>
+
+    <footer class="mt-24 border-t">
+      <div
+        class="mx-auto flex max-w-5xl flex-col gap-2 px-6 py-10 text-[13px] text-muted-foreground sm:flex-row sm:items-center"
+      >
+        <p>
+          nopass is free software under the
+          <a class="underline underline-offset-2" href={`${SITE.repository}/blob/main/LICENSE`}
+            >GNU AGPLv3</a
+          >.
+        </p>
+        <div class="flex-1"></div>
+        <p>No analytics on this page. No fonts fetched. No cookies.</p>
+      </div>
+    </footer>
+  </body>
+</html>
