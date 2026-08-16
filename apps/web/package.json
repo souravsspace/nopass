@@ -1,0 +1,31 @@
+{
+  "name": "@nopass/web",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build",
+    "check-types": "astro sync && tsc --noEmit -p tsconfig.check.json",
+    "dev": "astro dev",
+    "lint": "biome check .",
+    "preview": "astro preview",
+    "test": "echo 'the site is checked by astro check and biome' && exit 0"
+  },
+  "dependencies": {
+    "@nopass/ui": "workspace:*",
+    "motion": "12.34.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.6",
+    "@astrojs/react": "5.0.0",
+    "@astrojs/sitemap": "3.7.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.4",
+    "astro": "5.16.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2"
+  }
+}

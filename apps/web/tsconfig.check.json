@@ -1,0 +1,11 @@
+{
+  // `astro check` is the right tool and cannot run here: it needs
+  // TypeScript's programmatic API, which the native 7.x compiler this
+  // workspace pins does not expose yet
+  // (https://github.com/withastro/roadmap/discussions/1321). Until it does,
+  // this checks everything that is not a `.astro` template — the islands, the
+  // content, the endpoints — and `astro build` catches the templates.
+  "extends": "./tsconfig.json",
+  "include": [".astro/types.d.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["dist"]
+}
