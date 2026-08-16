@@ -301,6 +301,13 @@ nopass passkey add-key [--label name] [--pin]
 nopass passkey remove-key name           drop a security key slot
 nopass passkey disable                   remove the lock (requires auth)
 nopass passkey status                    show lock state and slots
+
+nopass webauthn register --rp <site> [--user <name>] <entry>
+                                         create a passkey for a website
+nopass webauthn list                     list the passkeys in the store
+nopass webauthn assert --challenge <b64url> <entry>
+                                         sign a site's challenge
+nopass webauthn verify <entry>           check an assertion, read on stdin
 nopass lock                              forget the cached passphrase now
 nopass agent status                      what is cached, and for how long
 nopass agent stop                        forget it and stop the agent
