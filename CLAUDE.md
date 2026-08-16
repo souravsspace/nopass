@@ -98,6 +98,17 @@ Unlike `graphify-out/`, it is hand-written and committed. The graph says what im
 - Keep every Mermaid block valid — a block that fails to parse renders as raw text on GitHub. Avoid `;` inside sequence-diagram notes.
 - Section 14 lists the invariants. Breaking one needs an ADR, not a patch.
 
+## 8. The Design System
+
+**`DESIGN.md` at the root is how nopass looks and why: colour, type, motion, voice, and the rules that are not negotiable.**
+
+It is the Sana system adapted to a password manager. `packages/ui/src/styles/globals.css` implements it.
+
+- Read it before changing a colour, a font, a radius, or writing any user-facing copy — product, docs, or marketing.
+- The in-page dropdown and save prompt hand-write the palette because a closed shadow root has no Tailwind. Change a colour in `globals.css` and change it in those two files in the same commit.
+- Voice is part of it: sentence case, second person, short sentences, no hype, no emoji, and say the awkward truths plainly.
+- Section 9 lists the accessibility rules. They are not trade-offs to make.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
