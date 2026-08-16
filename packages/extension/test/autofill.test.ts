@@ -86,6 +86,43 @@ describe("fieldKeyOf", () => {
     expect(fieldKeyOf(input("#y"))).toBe("postcode");
   });
 
+  it("reads a name that is exactly what the field holds", () => {
+    // These are the plainest names a checkout uses, and each is anchored so
+    // it cannot match half of a longer word. Tested one attribute at a time,
+    // because `name` and `id` joined together are never equal to either.
+    render(`
+      <form>
+        <input id="city" name="city" />
+        <input id="zip" name="zip" />
+        <input id="state" name="state" />
+        <input id="month" name="month" />
+        <input id="year" name="year" />
+      </form>
+    `);
+
+    expect(fieldKeyOf(input("#city"))).toBe("city");
+    expect(fieldKeyOf(input("#zip"))).toBe("postcode");
+    expect(fieldKeyOf(input("#state"))).toBe("region");
+    expect(fieldKeyOf(input("#month"))).toBe("exp-month");
+    expect(fieldKeyOf(input("#year"))).toBe("exp-year");
+  });
+
+  it("reads an id when the field has no name", () => {
+    render(`<input id="country" />`);
+
+    expect(fieldKeyOf(input("#country"))).toBe("country");
+  });
+
+  it("does not read a longer word as one of those names", () => {
+    render(`
+      <input id="a" name="citation" />
+      <input id="b" name="statement" />
+    `);
+
+    expect(fieldKeyOf(input("#a"))).toBeNull();
+    expect(fieldKeyOf(input("#b"))).toBeNull();
+  });
+
   it("leaves a field that says nothing alone", () => {
     render(`<input id="q" name="search" placeholder="Search" />`);
 
