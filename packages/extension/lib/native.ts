@@ -34,9 +34,19 @@ export type ClientErrorCode =
   | "unavailable"
   | "invalid_response";
 
-/** A request minus the `id`, which the client assigns. */
-export type RequestBody =
-  Omit<Extract<Request, { verb: Verb }>, "id"> extends infer T ? T : never;
+/**
+ * A request minus the `id`, which the client assigns.
+ *
+ * Distributed over the union on purpose. `Omit<Request, "id">` would collapse
+ * ten verbs into their common keys and accept a body belonging to none of
+ * them — which is how an `insert` still carrying the pre-record `password`
+ * and `url` keys once compiled, and failed only at the host.
+ */
+export type RequestBody = Request extends infer R
+  ? R extends { id: number }
+    ? Omit<R, "id">
+    : never
+  : never;
 
 export class HostError extends Error {
   readonly code: ErrorCode | ClientErrorCode;
@@ -82,14 +92,16 @@ export class NativeClient {
     this.#teardown("disconnected", "the connection was closed");
   }
 
-  request<B extends { verb: Verb }>(body: B): Promise<ResponseFor<B["verb"]>> {
+  request<V extends Verb>(
+    body: Extract<RequestBody, { verb: V }>
+  ): Promise<ResponseFor<V>> {
     // Not `async`: everything below either throws into the returned promise
     // or settles it from a listener, so there is nothing here to await.
     const id = this.#nextId++;
 
     // Validated before it leaves: the extension is the component most likely
     // to be tampered with, so the host should never be the first to notice.
-    return new Promise<ResponseFor<B["verb"]>>((resolve, reject) => {
+    return new Promise<ResponseFor<V>>((resolve, reject) => {
       const parsed = requestSchema.safeParse({ ...body, id });
       if (!parsed.success) {
         throw new HostError(
