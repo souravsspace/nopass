@@ -8,7 +8,7 @@
  */
 
 import { DEMO, expect, test } from "./harness";
-import { focusField, panel, panelIsOpen, pickRow } from "./panel";
+import { focusField, panel, panelIsOpen, pickRow, promptSave } from "./panel";
 
 function twoCards(store: {
   insert: (n: string, k: string, s: string, f: string[]) => void;
@@ -154,4 +154,77 @@ test("a card and an identity are not offered on each other's fields", async ({
 
   // Two cards on a card field, and the identity is not among them.
   expect(Math.round(cards.height / rowHeight)).toBe(2);
+});
+
+test("asks to keep a card that was just typed into a checkout", async ({
+  page,
+  store,
+}) => {
+  await page.goto(`${DEMO}/checkout.html`);
+  await page.fill("#ccname", "Sana Qureshi");
+  await page.fill("#ccnumber", "4111 1111 1111 4242");
+  await page.fill("#ccexp", "04/29");
+  await page.fill("#cccsc", "737");
+  await page.click("button[type=submit]");
+
+  await panel(page, "prompt");
+  await promptSave(page);
+
+  await expect
+    .poll(() => store.list(), { timeout: 10_000 })
+    .toContain("cards/card-4242");
+
+  const body = store.show("cards/card-4242");
+  expect(body).toContain("type: card");
+  expect(body).toContain("4111111111114242");
+  expect(body).toContain("cardholder: Sana Qureshi");
+  expect(body).toContain("exp-month: 04");
+  expect(body).toContain("exp-year: 2029");
+  // Card networks forbid keeping the security code, so nopass does not.
+  expect(body).not.toContain("737");
+  // A card belongs to no site, so it never gains the checkout's url.
+  expect(body).not.toContain("url:");
+});
+
+test("asks to keep an address that was just typed in", async ({
+  page,
+  store,
+}) => {
+  await page.goto(`${DEMO}/profile.html`);
+  await page.fill("#firstName", "Sana");
+  await page.fill("#lastName", "Qureshi");
+  await page.fill("#address1", "12 Example Road");
+  await page.fill("#city", "Dhaka");
+  await page.fill("#postcode", "1207");
+  await page.fill("#country", "Bangladesh");
+  await page.click("button[type=submit]");
+
+  await panel(page, "prompt");
+  await promptSave(page);
+
+  await expect
+    .poll(() => store.list(), { timeout: 10_000 })
+    .toContain("me/sana");
+
+  const body = store.show("me/sana");
+  expect(body).toContain("type: identity");
+  expect(body).toContain("given-name: Sana");
+  expect(body).toContain("city: Dhaka");
+  expect(body).toContain("country: Bangladesh");
+});
+
+test("does not ask about a card it already holds", async ({ page, store }) => {
+  store.insert("cards/visa", "card", "4111111111114242", [
+    "cardholder=Sana Qureshi",
+    "brand=Visa",
+  ]);
+
+  await page.goto(`${DEMO}/checkout.html`);
+  await page.fill("#ccname", "Sana Qureshi");
+  await page.fill("#ccnumber", "4111111111114242");
+  await page.fill("#cccsc", "737");
+  await page.click("button[type=submit]");
+  await page.waitForTimeout(2500);
+
+  expect(await panelIsOpen(page, "prompt")).toBe(false);
 });
