@@ -1194,9 +1194,15 @@ function NewLogin({
   const [kind, setKind] = useState<Kind>("login");
   const [name, setName] = useState(host ? `web/${host}` : "");
   const [secret, setSecret] = useState("");
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    origin ? { url: origin } : {}
-  );
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    // Seeded from the tab, and only for a login: a card filed under the site
+    // it was typed on would be offered there as though it were one.
+    const seed: Record<string, string> = {};
+    if (origin) {
+      seed.url = origin;
+    }
+    return seed;
+  });
   const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
