@@ -76,6 +76,15 @@
         "react-dom": "^19",
       },
     },
+    "tools/browser": {
+      "name": "@nopass/browser-e2e",
+      "version": "0.2.1",
+      "devDependencies": {
+        "@nopass/chrome": "workspace:*",
+        "@playwright/test": "1.62.1",
+        "typescript": "7.0.2",
+      },
+    },
     "tools/chrome": {
       "name": "@nopass/chrome",
       "version": "0.2.1",
@@ -93,6 +102,10 @@
         "typescript": "7.0.2",
         "wxt": "0.21.3",
       },
+    },
+    "tools/demo": {
+      "name": "@nopass/demo",
+      "version": "0.2.1",
     },
     "tools/firefox": {
       "name": "@nopass/firefox",
@@ -196,7 +209,11 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
+    "@nopass/browser-e2e": ["@nopass/browser-e2e@workspace:tools/browser"],
+
     "@nopass/chrome": ["@nopass/chrome@workspace:tools/chrome"],
+
+    "@nopass/demo": ["@nopass/demo@workspace:tools/demo"],
 
     "@nopass/extension": ["@nopass/extension@workspace:packages/extension"],
 
