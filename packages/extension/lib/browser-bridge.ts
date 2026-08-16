@@ -98,7 +98,7 @@ export function browserBridge(): Bridge {
     },
 
     async save(draft: Draft): Promise<string> {
-      return (await expect({ ...draft, kind: "save" }, "saved")).entry;
+      return (await expect({ draft, kind: "save" }, "saved")).entry;
     },
 
     async search(origin: string): Promise<Match[]> {
@@ -113,7 +113,7 @@ export function browserBridge(): Bridge {
     },
 
     async update(patch: Patch): Promise<string> {
-      return (await expect({ ...patch, kind: "update" }, "saved")).entry;
+      return (await expect({ kind: "update", patch }, "saved")).entry;
     },
   };
 }
