@@ -2,7 +2,7 @@ import { PROTOCOL_VERSION } from "@nopass/protocol";
 import { browser, defineBackground } from "#imports";
 import { suggestedName } from "../lib/capture";
 import type {
-  Captured,
+  CapturedRecord,
   ExtensionReply,
   ExtensionRequest,
   FillCommand,
@@ -17,6 +17,9 @@ import { initialSession, reduce } from "../lib/session";
 
 /** The name the native messaging manifest registers. */
 const HOST_NAME = "com.nopass.host";
+
+/** How much of a card number a prompt or a row may show. */
+const CARD_TAIL = 4;
 
 export default defineBackground(() => {
   const client = new NativeClient(
@@ -39,7 +42,12 @@ export default defineBackground(() => {
    */
   const offered = new Map<
     number,
-    Captured & { offer: SaveOffer; origin: string; pushed: boolean }
+    {
+      offer: SaveOffer;
+      origin: string;
+      pushed: boolean;
+      record: CapturedRecord;
+    }
   >();
 
   const setSession = (next: SessionState) => {
@@ -129,11 +137,22 @@ export default defineBackground(() => {
       return;
     }
     held.pushed = true;
-    const command: OfferCommand = { kind: "offerSave", offer: held.offer };
-    // A page with no content script in it — a settings page, a PDF — is not
-    // a fault; there is simply nowhere to ask.
-    void browser.tabs.sendMessage(tabId, command).catch(() => undefined);
+    void tell(tabId, held.offer);
   });
+
+  /**
+   * Put an offer on whatever page a tab currently has.
+   *
+   * A page with no content script in it — a settings page, a PDF, one that is
+   * mid-navigation — is not a fault; there is simply nowhere to ask.
+   */
+  function tell(tabId: number, offer: SaveOffer): Promise<void> {
+    const command: OfferCommand = { kind: "offerSave", offer };
+    return browser.tabs
+      .sendMessage(tabId, command)
+      .then(() => undefined)
+      .catch(() => undefined);
+  }
 
   async function handle(
     request: ExtensionRequest,
@@ -323,10 +342,7 @@ export default defineBackground(() => {
     }
 
     if (request.kind === "captured") {
-      return await offer(tabId, request.origin, {
-        password: request.password,
-        ...(request.username ? { username: request.username } : {}),
-      });
+      return await offer(tabId, request.origin, request.record);
     }
 
     // Only the name travels. The password is the one this tab reported when
@@ -337,32 +353,37 @@ export default defineBackground(() => {
       return failure("bad_request", "there is no login to save");
     }
 
+    // A login is the only kind that belongs to a site, so it is the only one
+    // that gets a `url:` line — a card filed under the checkout it was typed
+    // on would be offered there as a login ever after.
+    const { record } = held;
     const reply = await client.request({
       entry: request.entry,
-      fields: [
-        { key: "url", value: held.origin },
-        ...(held.username ? [{ key: "username", value: held.username }] : []),
-      ],
-      kind: "login",
-      secret: held.password,
+      fields:
+        record.kind === "login"
+          ? [...record.fields, { key: "url", value: held.origin }]
+          : record.fields,
+      kind: record.kind,
       verb: "insert",
+      ...(record.secret === undefined ? {} : { secret: record.secret }),
     });
     offered.delete(tabId);
     return { entry: reply.entry, kind: "saved", ok: true };
   }
 
   /**
-   * Hold a submitted login, and say whether it is worth asking about.
+   * Hold what was submitted, and say whether it is worth asking about.
    *
    * Nothing is asked when the store is locked — the answer would be an unlock
-   * prompt over a page that is already navigating away — or when the site
-   * already has an entry under that username, which is the ordinary case of
-   * signing in again.
+   * prompt over a page that is already navigating away — or when this is
+   * something the store already holds. What "already holds" means depends on
+   * the kind, and each check is made against the rows `items` returns, so
+   * deciding whether to ask costs no secret.
    */
   async function offer(
     tabId: number,
     origin: string,
-    login: Captured
+    record: CapturedRecord
   ): Promise<ExtensionReply> {
     const host = hostOf(origin);
     if (!host) {
@@ -374,21 +395,107 @@ export default defineBackground(() => {
       return { kind: "offer", offer: null, ok: true };
     }
 
-    const { matches } = await client.request({ origin, verb: "search" });
-    const known = matches.some(
-      (match) => (match.username ?? "") === (login.username ?? "")
-    );
-    if (known) {
+    const detail = detailOf(record);
+    if (await alreadyStored(origin, record, detail)) {
       return { kind: "offer", offer: null, ok: true };
     }
 
     const details: SaveOffer = {
       host,
-      suggestion: suggestedName(host),
-      ...(login.username ? { username: login.username } : {}),
+      kind: record.kind,
+      suggestion: suggestFor(record, host, detail),
+      ...(detail ? { detail } : {}),
     };
-    offered.set(tabId, { ...login, offer: details, origin, pushed: false });
+    offered.set(tabId, { offer: details, origin, pushed: false, record });
+
+    /*
+     * The reply below reaches the content script that asked — unless the page
+     * has already gone, which is the ordinary case for a form that posts. The
+     * push after a completed navigation covers that, but only if the offer
+     * was stored before the new page finished loading, and a slow first
+     * request to the host can lose that race. So it is also pushed now, at
+     * whatever page the tab currently has, and `pushed` is left alone: the
+     * navigation may still be coming.
+     */
+    void tell(tabId, details);
     return { kind: "offer", offer: details, ok: true };
+  }
+
+  /** The line the prompt shows under its question. Never a secret. */
+  function detailOf(record: CapturedRecord): string | undefined {
+    const value = (key: string) =>
+      record.fields.find((field) => field.key === key)?.value;
+
+    if (record.kind === "card") {
+      const tail = (record.secret ?? "").slice(-CARD_TAIL);
+      const brand = value("brand");
+      return brand ? `${brand} •••• ${tail}` : `•••• ${tail}`;
+    }
+    if (record.kind === "identity") {
+      const name = [value("given-name"), value("family-name")]
+        .filter(Boolean)
+        .join(" ");
+      return name || value("email") || value("city");
+    }
+    return value("username");
+  }
+
+  /** The name to offer, which is a guess the user can rewrite. */
+  function suggestFor(
+    record: CapturedRecord,
+    host: string,
+    detail: string | undefined
+  ): string {
+    if (record.kind === "card") {
+      const brand = record.fields.find((field) => field.key === "brand")?.value;
+      const tail = (record.secret ?? "").slice(-CARD_TAIL);
+      return `cards/${(brand ?? "card").toLowerCase()}-${tail}`;
+    }
+    if (record.kind === "identity") {
+      const given = record.fields.find(
+        (field) => field.key === "given-name"
+      )?.value;
+      return `me/${(given ?? "details").toLowerCase().replace(/\s+/g, "-")}`;
+    }
+    return suggestedName(host);
+  }
+
+  /**
+   * Whether this is something the store already has.
+   *
+   * A login is the site's, so `search` answers it. A card and an identity
+   * belong to no site, so the question is asked of every row of that kind —
+   * and answered on the hint, which is a masked tail or a name, so a store
+   * full of cards is never decrypted to decide whether to put up a prompt.
+   */
+  async function alreadyStored(
+    origin: string,
+    record: CapturedRecord,
+    detail: string | undefined
+  ): Promise<boolean> {
+    if (record.kind === "login") {
+      const username =
+        record.fields.find((field) => field.key === "username")?.value ?? "";
+      const { matches } = await client.request({ origin, verb: "search" });
+      return matches.some((match) => (match.username ?? "") === username);
+    }
+
+    if (!detail) {
+      return false;
+    }
+    const { items } = await client.request({
+      kinds: [record.kind],
+      verb: "items",
+    });
+
+    // A card is the same card if it ends in the same four digits, whatever
+    // the page did or did not say about the brand. An identity is the same
+    // person if the row reads the same, which is the name the host built.
+    if (record.kind === "card") {
+      const tail = (record.secret ?? "").slice(-CARD_TAIL);
+      return items.some((item) => (item.hint ?? "").endsWith(tail));
+    }
+    return items.some((item) => item.hint === detail);
   }
 
   /**
