@@ -1,17 +1,24 @@
 <!doctype html>
-<meta charset="utf-8" />
+<meta charset="utf-8">
 <title>Sign in — nopass demo</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="/demo.css" />
+<meta content="width=device-width, initial-scale=1" name="viewport">
+<link href="/demo.css" rel="stylesheet">
 <main>
   <h1>Sign in</h1>
   <p>Put the cursor in either field to see what nopass has for this site.</p>
   <form action="/done.html" method="get">
     <label for="email">Email</label>
-    <input autocomplete="username" id="email" name="email" type="email" />
+    <input autocomplete="username" id="email" name="email" type="email">
     <label for="password">Password</label>
-    <input autocomplete="current-password" id="password" name="password" type="password" />
+    <input
+      autocomplete="current-password"
+      id="password"
+      name="password"
+      type="password"
+    >
     <button type="submit">Sign in</button>
   </form>
-  <p class="note">Submitting goes to a static page. Nothing is sent anywhere.</p>
+  <p class="note">
+    Submitting goes to a static page. Nothing is sent anywhere.
+  </p>
 </main>

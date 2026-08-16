@@ -1,28 +1,46 @@
 <!doctype html>
-<meta charset="utf-8" />
+<meta charset="utf-8">
 <title>Checkout — nopass demo</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="/demo.css" />
+<meta content="width=device-width, initial-scale=1" name="viewport">
+<link href="/demo.css" rel="stylesheet">
 <main>
   <h1>Checkout</h1>
-  <p>Card fields declare themselves with <code>autocomplete</code>. Focus one to pick a card.</p>
+  <p>
+    Card fields declare themselves with <code>autocomplete</code>. Focus one to
+    pick a card.
+  </p>
   <form action="/done.html" method="get">
     <label for="ccname">Name on card</label>
-    <input autocomplete="cc-name" id="ccname" name="ccname" />
+    <input autocomplete="cc-name" id="ccname" name="ccname">
     <label for="ccnumber">Card number</label>
-    <input autocomplete="cc-number" id="ccnumber" inputmode="numeric" name="ccnumber" />
+    <input
+      autocomplete="cc-number"
+      id="ccnumber"
+      inputmode="numeric"
+      name="ccnumber"
+    >
     <div class="row">
       <div>
         <label for="ccexp">Expiry</label>
-        <input autocomplete="cc-exp" id="ccexp" name="ccexp" placeholder="MM/YY" />
+        <input
+          autocomplete="cc-exp"
+          id="ccexp"
+          name="ccexp"
+          placeholder="MM/YY"
+        >
       </div>
       <div>
         <label for="cccsc">Security code</label>
-        <input autocomplete="cc-csc" id="cccsc" name="cccsc" inputmode="numeric" />
+        <input
+          autocomplete="cc-csc"
+          id="cccsc"
+          inputmode="numeric"
+          name="cccsc"
+        >
       </div>
     </div>
     <label for="billingzip">Billing postcode</label>
-    <input autocomplete="billing postal-code" id="billingzip" name="billingzip" />
+    <input autocomplete="billing postal-code" id="billingzip" name="billingzip">
     <button type="submit">Pay</button>
   </form>
 </main>

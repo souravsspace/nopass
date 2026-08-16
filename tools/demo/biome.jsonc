@@ -1,0 +1,7 @@
+{
+  // The server is a Bun script; `Bun` is a global the root config does not
+  // know about because nothing else in the repo runs on it directly.
+  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "extends": "//",
+  "javascript": { "globals": ["Bun"] }
+}
