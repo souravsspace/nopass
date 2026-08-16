@@ -9,6 +9,7 @@
  */
 
 import type { Field, Item, Kind, Match, Secret } from "@nopass/protocol";
+import type { CapturedRecord } from "./capture";
 import type { SessionState } from "./session";
 
 /** A new entry on its way to the store. Never carries an existing name. */
@@ -70,15 +71,11 @@ export type ContentRequest =
    * this vocabulary exists to prevent.
    */
   | { kind: "wallet" }
-  | ({ kind: "captured"; origin: string } & Captured)
+  | { kind: "captured"; origin: string; record: CapturedRecord }
   | { kind: "saveCaptured"; entry: string }
   | { kind: "dismissCaptured" };
 
-/** A login read off a page as it was submitted. */
-export interface Captured {
-  password: string;
-  username?: string;
-}
+export type { CapturedRecord } from "./capture";
 
 /**
  * What the background will let the page offer, if anything.
@@ -88,9 +85,12 @@ export interface Captured {
  * over a page the user is trying to leave.
  */
 export interface SaveOffer {
+  /** The line under the title: a username, a masked card, a person. */
+  detail?: string;
   host: string;
+  /** What the prompt is about, so it can say so. */
+  kind: Kind;
   suggestion: string;
-  username?: string;
 }
 
 export type ExtensionRequest = PopupRequest | ContentRequest;
