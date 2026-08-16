@@ -2481,3 +2481,223 @@ fn show_field_says_so_when_the_entry_has_no_such_field() {
         .assert()
         .failure();
 }
+
+#[test]
+fn webauthn_register_writes_a_passkey_and_prints_what_a_site_expects() {
+    let store = TestStore::new();
+    let out = store
+        .cmd()
+        .args([
+            "webauthn",
+            "register",
+            "--rp",
+            "example.com",
+            "--user",
+            "sana@example.com",
+            "--challenge",
+            "Y2hhbGxlbmdl",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+
+    let printed = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    // What a browser hands to `navigator.credentials.create`'s caller.
+    for key in [
+        "\"type\": \"public-key\"",
+        "\"id\":",
+        "\"rawId\":",
+        "\"attestationObject\":",
+        "\"clientDataJSON\":",
+    ] {
+        assert!(printed.contains(key), "{key} missing from {printed}");
+    }
+
+    let body = store.show("keys/example");
+    assert!(body.contains("type: passkey"), "{body}");
+    assert!(body.contains("rp: example.com"), "{body}");
+    assert!(body.contains("user: sana@example.com"), "{body}");
+    assert!(body.contains("counter: 0"), "{body}");
+    assert!(body.contains("alg: -7"), "{body}");
+}
+
+#[test]
+fn webauthn_list_shows_the_passkeys_and_not_their_keys() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "webauthn",
+            "register",
+            "--rp",
+            "example.com",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+
+    let out = store.cmd().args(["webauthn", "list"]).assert().success();
+    let printed = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+
+    assert!(printed.contains("keys/example"), "{printed}");
+    assert!(printed.contains("example.com"), "{printed}");
+
+    let secret = store
+        .show("keys/example")
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(!printed.contains(&secret), "list printed the private key");
+}
+
+#[test]
+fn webauthn_assert_signs_a_challenge_and_verify_accepts_it() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "webauthn",
+            "register",
+            "--rp",
+            "example.com",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+
+    let signed = store
+        .cmd()
+        .args([
+            "webauthn",
+            "assert",
+            "--challenge",
+            "Y2hhbGxlbmdl",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+    let printed = String::from_utf8(signed.get_output().stdout.clone()).unwrap();
+    assert!(printed.contains("\"signature\":"), "{printed}");
+    assert!(printed.contains("\"authenticatorData\":"), "{printed}");
+
+    // `verify` is the relying party's half, run locally so a signature can be
+    // watched to hold rather than taken on trust.
+    store
+        .cmd()
+        .args(["webauthn", "verify", "keys/example"])
+        .write_stdin(printed)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("signature is valid"));
+}
+
+#[test]
+fn webauthn_assert_moves_the_counter_on_every_use() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "webauthn",
+            "register",
+            "--rp",
+            "example.com",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+
+    for _ in 0..2 {
+        store
+            .cmd()
+            .args([
+                "webauthn",
+                "assert",
+                "--challenge",
+                "Y2hhbGxlbmdl",
+                "keys/example",
+            ])
+            .assert()
+            .success();
+    }
+
+    assert!(
+        store.show("keys/example").contains("counter: 2"),
+        "the counter did not move: {}",
+        store.show("keys/example")
+    );
+}
+
+#[test]
+fn webauthn_verify_refuses_a_tampered_signature() {
+    let store = TestStore::new();
+    store
+        .cmd()
+        .args([
+            "webauthn",
+            "register",
+            "--rp",
+            "example.com",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+
+    let signed = store
+        .cmd()
+        .args([
+            "webauthn",
+            "assert",
+            "--challenge",
+            "Y2hhbGxlbmdl",
+            "keys/example",
+        ])
+        .assert()
+        .success();
+    let printed = String::from_utf8(signed.get_output().stdout.clone()).unwrap();
+    // Swap a character of the signature for another valid base64url one.
+    let tampered = printed.replacen("\"signature\": \"M", "\"signature\": \"N", 1);
+
+    store
+        .cmd()
+        .args(["webauthn", "verify", "keys/example"])
+        .write_stdin(tampered)
+        .assert()
+        .failure();
+}
+
+#[test]
+fn webauthn_register_refuses_a_name_that_is_taken() {
+    let store = TestStore::new();
+    store.insert("keys/example", "not-a-passkey");
+
+    store
+        .cmd()
+        .args([
+            "webauthn",
+            "register",
+            "--rp",
+            "example.com",
+            "keys/example",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn webauthn_assert_refuses_an_entry_that_is_not_a_passkey() {
+    let store = TestStore::new();
+    store.insert("web/example.com", "hunter2");
+
+    store
+        .cmd()
+        .args([
+            "webauthn",
+            "assert",
+            "--challenge",
+            "Y2hhbGxlbmdl",
+            "web/example.com",
+        ])
+        .assert()
+        .failure();
+}
