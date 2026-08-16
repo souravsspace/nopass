@@ -259,11 +259,13 @@ export default defineBackground(() => {
         // `ContentRequest` has no `save`, so a page's script cannot put an
         // entry into the store even if it guessed the shape (ADR-0006).
         const reply = await client.request({
-          entry: request.entry,
+          entry: request.draft.entry,
           verb: "insert",
-          ...(request.kind ? { kind: request.kind } : {}),
-          ...(request.secret === undefined ? {} : { secret: request.secret }),
-          ...(request.fields ? { fields: request.fields } : {}),
+          ...(request.draft.kind ? { kind: request.draft.kind } : {}),
+          ...(request.draft.secret === undefined
+            ? {}
+            : { secret: request.draft.secret }),
+          ...(request.draft.fields ? { fields: request.draft.fields } : {}),
         });
         return { entry: reply.entry, kind: "saved", ok: true };
       }
@@ -273,10 +275,12 @@ export default defineBackground(() => {
         // entry screen (ADR-0009). It names fields; the host leaves every
         // line it was not told about exactly where it is.
         const reply = await client.request({
-          entry: request.entry,
+          entry: request.patch.entry,
           verb: "update",
-          ...(request.secret === undefined ? {} : { secret: request.secret }),
-          ...(request.fields ? { fields: request.fields } : {}),
+          ...(request.patch.secret === undefined
+            ? {}
+            : { secret: request.patch.secret }),
+          ...(request.patch.fields ? { fields: request.patch.fields } : {}),
         });
         return { entry: reply.entry, kind: "saved", ok: true };
       }
@@ -335,10 +339,13 @@ export default defineBackground(() => {
 
     const reply = await client.request({
       entry: request.entry,
-      password: held.password,
-      url: held.origin,
+      fields: [
+        { key: "url", value: held.origin },
+        ...(held.username ? [{ key: "username", value: held.username }] : []),
+      ],
+      kind: "login",
+      secret: held.password,
       verb: "insert",
-      ...(held.username ? { username: held.username } : {}),
     });
     offered.delete(tabId);
     return { entry: reply.entry, kind: "saved", ok: true };
