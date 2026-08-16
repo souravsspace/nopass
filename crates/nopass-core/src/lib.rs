@@ -10,6 +10,7 @@ pub mod fields;
 pub mod generate;
 pub mod git;
 pub mod lock;
+pub mod passkey;
 pub mod paths;
 pub mod record;
 pub mod store;
