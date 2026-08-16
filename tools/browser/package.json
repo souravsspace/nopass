@@ -1,0 +1,17 @@
+{
+  "name": "@nopass/browser-e2e",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "e2e": "playwright test",
+    "lint": "biome check .",
+    "test": "echo 'run bun run e2e; it needs a built extension and host' && exit 0"
+  },
+  "devDependencies": {
+    "@nopass/chrome": "workspace:*",
+    "@playwright/test": "1.62.1",
+    "typescript": "7.0.2"
+  }
+}
