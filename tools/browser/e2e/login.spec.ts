@@ -17,6 +17,9 @@ import {
   typeName,
 } from "./panel";
 
+/** Where the demo forms land after a submit. */
+const DONE_PAGE = /done\.html/;
+
 test("offers a stored login on the site it belongs to, and fills it", async ({
   page,
   store,
@@ -53,7 +56,7 @@ test("asks to save a login it has never seen, and writes it", async ({
   await page.click("button[type=submit]");
 
   // The form navigates, so the prompt arrives on the page that replaced it.
-  await expect(page).toHaveURL(/done\.html/);
+  await expect(page).toHaveURL(DONE_PAGE);
   await panel(page, "prompt");
   await promptSave(page);
 

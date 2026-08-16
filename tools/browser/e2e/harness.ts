@@ -31,6 +31,9 @@ import {
   type Page,
 } from "@playwright/test";
 
+/** One entry per file, and the extension the store writes. */
+const ENTRY_FILE = /\.np$/;
+
 const REPO = resolve(import.meta.dirname, "../../..");
 const EXTENSION = join(REPO, "tools/chrome/.output/chrome-mv3");
 const CLI = join(REPO, "target/debug/nopass");
@@ -57,11 +60,16 @@ export interface Store {
   /** The directory `NOPASS_DIR` points at. */
   readonly dir: string;
   /** Write an entry, the way a user would from a terminal. */
-  insert(name: string, kind: string, secret: string, fields: string[]): void;
+  insert: (
+    name: string,
+    kind: string,
+    secret: string,
+    fields: string[]
+  ) => void;
   /** Every entry name currently in the store. */
-  list(): string[];
+  list: () => string[];
   /** The decrypted body of an entry, for asserting what actually landed. */
-  show(name: string): string;
+  show: (name: string) => string;
 }
 
 function makeStore(root: string): Store {
@@ -100,10 +108,11 @@ function makeStore(root: string): Store {
             return walk(join(at, found.name), `${prefix}${found.name}/`);
           }
           return found.name.endsWith(".np")
-            ? [`${prefix}${found.name.replace(/\.np$/, "")}`]
+            ? [`${prefix}${found.name.replace(ENTRY_FILE, "")}`]
             : [];
         });
-      return walk(".", "").sort();
+      // Sorted by name, which is the order the host lists them in.
+      return walk(".", "").sort((left, right) => left.localeCompare(right));
     },
     show(name) {
       return run(["show", name]);
@@ -127,6 +136,26 @@ function registerHost(profile: string, id: string): void {
   );
 }
 
+/**
+ * How the browser is started.
+ *
+ * `CHROMIUM_PATH` is for a machine whose Playwright browsers were installed
+ * out of band — this container is one — and is left off entirely when it is
+ * unset, rather than passed as undefined.
+ */
+function launch(env: NodeJS.ProcessEnv) {
+  const path = process.env.CHROMIUM_PATH;
+  return {
+    args: [
+      `--disable-extensions-except=${EXTENSION}`,
+      `--load-extension=${EXTENSION}`,
+      "--headless=new",
+    ],
+    env,
+    ...(path ? { executablePath: path } : {}),
+  };
+}
+
 interface Fixtures {
   /** A page with the extension loaded and the host registered. */
   page: Page;
@@ -146,28 +175,15 @@ export const test = base.extend<Fixtures>({
     // Loaded twice on purpose: the ID is only knowable once a browser has the
     // extension, and the native messaging manifest has to name that ID before
     // the extension asks for the host. The first launch is thrown away.
-    const first = await chromium.launchPersistentContext(profile, {
-      args: [
-        `--disable-extensions-except=${EXTENSION}`,
-        `--load-extension=${EXTENSION}`,
-        "--headless=new",
-      ],
-      env,
-      executablePath: process.env.CHROMIUM_PATH || undefined,
-    });
+    const first = await chromium.launchPersistentContext(profile, launch(env));
     const id = await extensionId(first);
     await first.close();
     registerHost(profile, id);
 
-    const context = await chromium.launchPersistentContext(profile, {
-      args: [
-        `--disable-extensions-except=${EXTENSION}`,
-        `--load-extension=${EXTENSION}`,
-        "--headless=new",
-      ],
-      env,
-      executablePath: process.env.CHROMIUM_PATH || undefined,
-    });
+    const context = await chromium.launchPersistentContext(
+      profile,
+      launch(env)
+    );
 
     try {
       await use(await context.newPage());
@@ -187,4 +203,9 @@ export const test = base.extend<Fixtures>({
   },
 });
 
+/*
+ * Re-exported so a spec imports `test` and `expect` from one place — the one
+ * that knows about the store and the browser it hands them.
+ */
+// biome-ignore lint/performance/noBarrelFile: two names, not a barrel
 export { expect } from "@playwright/test";

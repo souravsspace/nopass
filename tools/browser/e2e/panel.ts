@@ -30,7 +30,7 @@ export interface Box {
   y: number;
 }
 
-async function boxOf(page: Page, panel: Panel): Promise<Box | null> {
+async function boxOf(page: Page, which: Panel): Promise<Box | null> {
   return await page.evaluate((position) => {
     const host = [...document.body.children].find(
       (node) =>
@@ -48,7 +48,7 @@ async function boxOf(page: Page, panel: Panel): Promise<Box | null> {
       x: rect.x,
       y: rect.y,
     };
-  }, POSITION[panel]);
+  }, POSITION[which]);
 }
 
 /** Wait for a panel to be on screen, and answer with where it is. */
@@ -87,6 +87,8 @@ export async function panelIsOpen(page: Page, which: Panel): Promise<boolean> {
  */
 export async function focusField(page: Page, selector: string): Promise<void> {
   for (let attempt = 0; attempt < 4; attempt++) {
+    // biome-ignore-start lint/performance/noAwaitInLoops: retrying is the
+    // point — each attempt has to finish before the next one starts.
     await page.focus(selector);
     for (let tick = 0; tick < 10; tick++) {
       if (await panelIsOpen(page, "dropdown")) {
@@ -96,6 +98,7 @@ export async function focusField(page: Page, selector: string): Promise<void> {
     }
     await page.locator(selector).blur();
     await page.waitForTimeout(200);
+    // biome-ignore-end lint/performance/noAwaitInLoops: as above
   }
   throw new Error(`no dropdown appeared under ${selector}`);
 }
