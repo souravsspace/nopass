@@ -1,0 +1,8 @@
+{
+  // See tools/chrome/tsconfig.json: the generated config is the real one, and
+  // this adds JSX so the React popup type-checks under this target too.
+  "extends": "../../packages/extension/.wxt/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  }
+}
