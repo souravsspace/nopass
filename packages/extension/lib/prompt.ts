@@ -8,14 +8,25 @@
  */
 
 export interface SavePromptView {
-  /** The site the login was typed into, shown so the offer is attributable. */
+  /** A username, a masked card, a person — never a secret. */
+  detail?: string | undefined;
+  /** The site this was typed into, shown so the offer is attributable. */
   host: string;
+  /** What is being offered, which decides what the prompt asks. */
+  kind: "card" | "identity" | "login" | "passkey";
   onDismiss: () => void;
   onSave: (entry: string) => void;
   /** The name the entry would take, which the user may rewrite. */
   suggestion: string;
-  username?: string | undefined;
 }
+
+/** What the prompt asks, which is not the same question for each kind. */
+const TITLES: Record<SavePromptView["kind"], string> = {
+  card: "Save this card?",
+  identity: "Save these details?",
+  login: "Save this login?",
+  passkey: "Save this passkey?",
+};
 
 /** Render the prompt. Replaces whatever was there, so it can be re-rendered. */
 export function renderSavePrompt(root: ShadowRoot, view: SavePromptView): void {
@@ -28,13 +39,11 @@ export function renderSavePrompt(root: ShadowRoot, view: SavePromptView): void {
 
   const title = document.createElement("div");
   title.className = "np-save-title";
-  title.textContent = "Save this login?";
+  title.textContent = TITLES[view.kind];
 
   const where = document.createElement("div");
   where.className = "np-save-meta";
-  where.textContent = view.username
-    ? `${view.username} — ${view.host}`
-    : view.host;
+  where.textContent = view.detail ? `${view.detail} — ${view.host}` : view.host;
 
   const label = document.createElement("label");
   label.className = "np-save-label";
