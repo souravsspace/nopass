@@ -1,0 +1,11 @@
+{
+  // WXT generates the real configuration — module resolution, the `#imports`
+  // alias, the browser globals — when `wxt prepare` runs. This adds the one
+  // thing it leaves out for a project whose popup is React, and exists so
+  // `entrypoints/` is type-checked at all: the extension package excludes it,
+  // because outside a prepared target `#imports` does not resolve.
+  "extends": "../../packages/extension/.wxt/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  }
+}
