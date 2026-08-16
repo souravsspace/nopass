@@ -13,3 +13,4 @@ Why the codebase is shaped the way it is. Format: [Michael Nygard's ADR](https:/
 | [0007](0007-saving-a-login-from-the-page.md) | A page may offer a login; only the user may name one | accepted | 2026-08-15 |
 | [0008](0008-typed-records-in-the-entry-body.md) | An entry says what it is, on a `type:` line | accepted | 2026-08-15 |
 | [0009](0009-updating-an-entry-from-the-extension.md) | The extension may rewrite an entry, field by field | accepted | 2026-08-15 |
+| [0010](0010-nopass-as-a-webauthn-authenticator.md) | nopass is the authenticator, and the CLI is where it starts | accepted | 2026-08-16 |
