@@ -15,6 +15,7 @@ use nopass_core::agent;
 mod auth;
 mod fido2;
 mod setup;
+mod webauthn;
 
 /// Build the crypto backend, attaching the interactive unlocker so locked
 /// (passkey/passphrase) identities prompt for authentication on use.
@@ -136,6 +137,9 @@ enum Cmd {
         fields: Vec<String>,
         name: String,
     },
+    /// Passkeys for websites: create one, sign in with it, check a signature
+    #[command(subcommand)]
+    Webauthn(WebauthnCmd),
     /// Change fields of an entry that is already in the store
     Set {
         /// Replace the first line — the password, or a card's number
@@ -229,6 +233,43 @@ enum AgentCmd {
     Serve,
 }
 
+/// The site half of passkeys, which is not the same thing as `passkey`:
+/// `nopass passkey` locks your identity, and these create and use the
+/// credentials a website knows you by.
+#[derive(Subcommand)]
+enum WebauthnCmd {
+    /// Create a passkey for a site and print what the site is told
+    Register {
+        /// The site's relying-party id — a domain, such as example.com
+        #[arg(long)]
+        rp: String,
+        /// The account name the site should show
+        #[arg(long)]
+        user: Option<String>,
+        /// The page's origin, if it is not https://<rp>
+        #[arg(long)]
+        origin: Option<String>,
+        /// The site's challenge, base64url
+        #[arg(long)]
+        challenge: Option<String>,
+        name: String,
+    },
+    /// List the passkeys in the store
+    List,
+    /// Sign a site's challenge with a stored passkey
+    Assert {
+        /// The site's challenge, base64url
+        #[arg(long)]
+        challenge: Option<String>,
+        /// The page's origin, if it is not https://<rp>
+        #[arg(long)]
+        origin: Option<String>,
+        name: String,
+    },
+    /// Check an assertion — read on stdin — against the passkey that made it
+    Verify { name: String },
+}
+
 #[derive(Subcommand)]
 enum PasskeyCmd {
     /// Encrypt the identity so every access requires authentication
@@ -318,6 +359,29 @@ fn run() -> Result<()> {
             r#type.as_deref(),
             &fields,
         ),
+        Some(Cmd::Webauthn(action)) => match action {
+            WebauthnCmd::Register {
+                rp,
+                user,
+                origin,
+                challenge,
+                name,
+            } => webauthn::register(
+                &store,
+                &name,
+                &rp,
+                user.as_deref(),
+                origin.as_deref(),
+                challenge.as_deref(),
+            ),
+            WebauthnCmd::List => webauthn::list(&store),
+            WebauthnCmd::Assert {
+                challenge,
+                origin,
+                name,
+            } => webauthn::assert(&store, &name, challenge.as_deref(), origin.as_deref()),
+            WebauthnCmd::Verify { name } => webauthn::verify(&store, &name),
+        },
         Some(Cmd::Set {
             secret,
             name,
