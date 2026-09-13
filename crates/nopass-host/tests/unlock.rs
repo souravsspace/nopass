@@ -29,8 +29,23 @@ fn refuses_an_unlock_it_cannot_keep() {
     std::env::set_var("NOPASS_AGENT_SOCK", dir.path().join("agent.sock"));
     std::env::set_var("NOPASS_BIN", dir.path().join("no-such-nopass"));
 
-    // No cache lifetime configured — the shipped default, under which a
-    // browser unlock would expire the instant it was granted.
+    // No `cache-ttl` line at all: the shipped default must apply, so the
+    // failure is the agent's to report, not the setting's.
+    std::fs::write(&config, "identity = /elsewhere/identity.txt\n").expect("the config writes");
+    let error = Session::new(identity.clone())
+        .unlock(PASSPHRASE)
+        .expect_err("an unlock with nowhere to live fails");
+    assert!(
+        error.to_string().contains("agent"),
+        "the shipped default should apply, naming the agent: {error}"
+    );
+    assert!(
+        !error.to_string().contains("cache-ttl"),
+        "the shipped default is not an explicit zero: {error}"
+    );
+
+    // Explicitly disabled (`cache-ttl = 0`), under which a browser unlock
+    // cannot be held at all.
     std::fs::write(&config, "cache-ttl = 0\n").expect("the config writes");
     let error = Session::new(identity.clone())
         .unlock(PASSPHRASE)
