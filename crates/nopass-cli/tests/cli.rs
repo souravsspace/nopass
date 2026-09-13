@@ -404,7 +404,11 @@ impl NativeStore {
             .env("NOPASS_AGENT_SOCK", self.dir.path().join("run/agent.sock"))
             .env_remove("NOPASS_BACKEND")
             .env_remove("NOPASS_KEY")
-            .env_remove("NOPASS_CACHE_TTL")
+            // The shipped default caches reads for DEFAULT_CACHE_TTL
+            // seconds; these tests need the old no-cache world, so it is
+            // pinned off explicitly here. Tests that want the shipped
+            // default call cmd_default_cache() instead.
+            .env("NOPASS_CACHE_TTL", "0")
             .env_remove("NOPASS_FIDO2_MOCK")
             .env_remove("NOPASS_UNLOCK");
         cmd
@@ -1167,7 +1171,11 @@ impl FreshMachine {
             .env_remove("NOPASS_CONFIG")
             .env_remove("NOPASS_BACKEND")
             .env_remove("NOPASS_KEY")
-            .env_remove("NOPASS_CACHE_TTL")
+            // The shipped default caches reads for DEFAULT_CACHE_TTL
+            // seconds; the tests here need the old no-cache world, so it
+            // is pinned off explicitly. Tests that want the shipped
+            // default call cmd_default_cache() instead.
+            .env("NOPASS_CACHE_TTL", "0")
             .env_remove("NOPASS_FIDO2_MOCK")
             .env_remove("NOPASS_UNLOCK");
         cmd
@@ -1178,6 +1186,15 @@ impl FreshMachine {
     fn cmd_cached(&self, ttl: u64) -> Command {
         let mut cmd = self.cmd();
         cmd.env("NOPASS_CACHE_TTL", ttl.to_string());
+        cmd
+    }
+
+    /// A command under the shipped default: no TTL in the environment, no
+    /// `cache-ttl` line in this HOME's config, so `DEFAULT_CACHE_TTL`
+    /// applies.
+    fn cmd_default_cache(&self) -> Command {
+        let mut cmd = self.cmd();
+        cmd.env_remove("NOPASS_CACHE_TTL");
         cmd
     }
 
@@ -1910,6 +1927,34 @@ fn a_cached_passphrase_opens_the_next_read() {
         .write_stdin("")
         .assert()
         .failure();
+}
+
+#[cfg(unix)]
+#[test]
+fn the_shipped_default_caches_reads() {
+    let machine = FreshMachine::new();
+    machine.set_up_with("master");
+    machine.insert_locked("master", "gmail", "hunter2");
+
+    // The first read pays for the passphrase.
+    machine
+        .cmd_default_cache()
+        .args(["show", "gmail"])
+        .write_stdin("master\n")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
+
+    // With no environment and no `cache-ttl` line anywhere, the shipped
+    // default still holds the unlock — this is what lets an unlock in the
+    // browser warm the terminal, and the other way round.
+    machine
+        .cmd_default_cache()
+        .args(["show", "gmail"])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stdout("hunter2\n");
 }
 
 #[cfg(unix)]
