@@ -41,8 +41,9 @@ impl Unlocker for AgentOnly {
 pub struct Session {
     identity_file: PathBuf,
     /// Seconds an unlocked identity stays in the agent. Read from the same
-    /// config the CLI reads, so the two never disagree. Zero — the shipped
-    /// default — means the extension asks every time.
+    /// config the CLI reads, so the two never disagree. An explicit zero
+    /// means the extension asks every time; unset, the shipped default
+    /// (`config::DEFAULT_CACHE_TTL`) applies.
     ttl: u64,
 }
 
@@ -54,7 +55,7 @@ impl Default for Session {
 
 impl Session {
     pub fn new(identity_file: PathBuf) -> Self {
-        let ttl = config::read_cache_ttl(&config::default_config_file()).unwrap_or(0);
+        let ttl = config::read_cache_ttl(&config::default_config_file()).unwrap_or(config::DEFAULT_CACHE_TTL);
         Self { identity_file, ttl }
     }
 
@@ -100,8 +101,8 @@ impl Session {
 
         if self.ttl == 0 {
             bail!(
-                "the passphrase cache is off, so an unlock could not be held: \
-                 set `cache-ttl` to a number of seconds in {}",
+                "the passphrase cache is off (`cache-ttl = 0`), so an unlock \
+                 could not be held: set `cache-ttl` to a number of seconds in {}",
                 config::default_config_file().display()
             );
         }
