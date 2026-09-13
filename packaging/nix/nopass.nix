@@ -45,7 +45,7 @@ rustPlatform.buildRustPackage {
     longDescription = ''
       nopass keeps each password in its own age-encrypted file under one
       directory. Every command that reads or changes the store asks for your
-      master passphrase; reads can reuse a cached one when you opt in.
+      master passphrase; reads can reuse a cached one for a few minutes.
     '';
     homepage = "https://github.com/souravsspace/nopass";
     changelog = "https://github.com/souravsspace/nopass/releases";
