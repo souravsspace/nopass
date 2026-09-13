@@ -381,7 +381,7 @@ THE PASSPHRASE CACHE
   lock                              forget the cached passphrase now
   agent status                      what is cached, and for how long
   agent stop                        forget it and shut the agent down
-                                    (off until cache-ttl is set; see below)
+                                    (off while cache-ttl is 0; see below)
 
 MAINTENANCE
   update [--check]                  check for a new release and install it
@@ -396,8 +396,9 @@ ENVIRONMENT
   NOPASS_DIR        where the store lives
   NOPASS_IDENTITY   where the private key lives (wins over the config file)
   NOPASS_CLIP_TIME  seconds before the clipboard is wiped (default 45)
-  NOPASS_CACHE_TTL  seconds a read may reuse an unlocked key (default 0,
-                    meaning never; \"cache-ttl\" in the config does the same)
+  NOPASS_CACHE_TTL  seconds a read may reuse an unlocked key (default 300,
+                    five minutes; \"cache-ttl\" in the config does the same,
+                    and 0 turns the cache off)
   NOPASS_UNLOCK     set to \"passphrase\" to skip enrolled security keys
                     (full list in the README)
 
