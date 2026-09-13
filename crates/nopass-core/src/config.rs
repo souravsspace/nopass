@@ -21,6 +21,12 @@ const IDENTITY_KEY: &str = "identity";
 /// How long an unlocked identity may be cached by the agent.
 const CACHE_TTL_KEY: &str = "cache-ttl";
 
+/// How long an unlocked identity stays cached when neither the environment
+/// nor the config file says anything: five minutes. Reads reuse the unlock
+/// for that long — which is what lets an unlock in the browser warm the
+/// terminal, and the other way round. `cache-ttl = 0` turns the cache off.
+pub const DEFAULT_CACHE_TTL: u64 = 300;
+
 /// The user's home directory, or an empty path if `HOME` is unset.
 pub fn home() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
