@@ -119,9 +119,10 @@ nopass init --identity ~/Vaults          # a directory -> ~/Vaults/nopass/identi
 nopass init --identity ~/Vaults/work.txt # a filename is taken literally
 ```
 
-Reading a password asks for the passphrase every time, like `pass` does.
-Nothing is cached between commands; within one command it asks once, however
-many entries that command has to decrypt.
+Reading a password asks for the passphrase, like `pass` does — though reads
+may reuse one unlocked in the last five minutes (see the passphrase cache
+below). Within one command it asks once, however many entries that command
+has to decrypt.
 
 You can also create the key explicitly first, or skip the passphrase:
 
@@ -395,11 +396,12 @@ Every command that touches the store proves the store is yours first:
   entry needs no key at all, so this prompt is the only thing between a
   borrowed terminal and an emptied store.
 
-By default nothing is remembered between commands. If that is too much
-typing, let reads reuse a passphrase for a while:
+Reads may reuse a passphrase for a while — `cache-ttl` seconds, 300 (five
+minutes) unless configured otherwise. Make it shorter or longer, or turn the
+cache off with `0`:
 
 ```sh
-echo "cache-ttl = 300" >> ~/.config/nopass/config   # or NOPASS_CACHE_TTL=300
+echo "cache-ttl = 60" >> ~/.config/nopass/config    # or NOPASS_CACHE_TTL=60
 ```
 
 The first unlock then starts a small agent that keeps the unlocked key **in
@@ -434,7 +436,7 @@ All optional, via environment variables:
 | `NOPASS_CLIP_TIME` | `45` | seconds before clipboard clears |
 | `NOPASS_GPG_OPTS` | — | extra flags for the gpg backend |
 | `NOPASS_UNLOCK` | — | `passphrase` skips enrolled security keys |
-| `NOPASS_CACHE_TTL` | `0` | seconds a *read* may reuse an unlocked key |
+| `NOPASS_CACHE_TTL` | `300` | seconds a *read* may reuse an unlocked key (0 disables) |
 | `NOPASS_AGENT_SOCK` | `$XDG_RUNTIME_DIR/nopass/agent.sock` | where the agent listens |
 | `NOPASS_FIDO2_MOCK` | — | software test authenticator state file (tests only) |
 
@@ -471,9 +473,9 @@ All optional, via environment variables:
   `nopass passkey enroll` to add a FIDO2 security key, or to lock a key that
   was created unprotected.
 - The unlocked key is held in memory for the life of a single command, and
-  never written to disk. With `cache-ttl` set it is also held by the agent —
-  still in memory, still never on disk — for that many seconds, and only
-  reads may use it.
+  never written to disk. With a nonzero `cache-ttl` it is also held by the
+  agent — still in memory, still never on disk — for that many seconds, and
+  only reads may use it.
 - The prompt on `insert`, `rm` and friends is a check by the program, not a
   cryptographic one: anything running as you can write entries with the
   public key alone, or delete files from the store directly. It defends a
