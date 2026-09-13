@@ -20,7 +20,7 @@ use nopass_core::agent;
 const FORCE_ENV: &str = "NOPASS_UNLOCK";
 
 /// Seconds to keep an unlocked identity in the agent, overriding the config
-/// file. Zero, the default, means no caching.
+/// file. Zero means no caching.
 const TTL_ENV: &str = "NOPASS_CACHE_TTL";
 
 /// Front-end unlocker: any enrolled security key, then the passphrase.
@@ -90,12 +90,12 @@ impl Unlocker for CachingUnlocker {
 }
 
 /// How long an unlocked identity may be cached: the environment wins over
-/// the config file, and the default is not to cache at all.
+/// the config file, and with neither set the shipped default applies.
 fn cache_ttl() -> u64 {
     if let Some(ttl) = std::env::var(TTL_ENV).ok().and_then(|v| v.parse().ok()) {
         return ttl;
     }
-    config::read_cache_ttl(&config::default_config_file()).unwrap_or(0)
+    config::read_cache_ttl(&config::default_config_file()).unwrap_or(config::DEFAULT_CACHE_TTL)
 }
 
 /// What the agent files a secret under: a digest of the identity exactly as
